@@ -29,8 +29,9 @@ O diretório de instalação fica propositalmente fora da área delegada. Esse i
 - ✅ Repositório público independente e histórico `main` do Community importado.
 - ✅ Licença Apache-2.0 e atribuição original preservadas.
 - ✅ Especificação do perfil permanente documentada.
-- ⚠️ Wrapper de instalação experimental para `/opt` estático, sem shell root nem perfil de operações privilegiadas Infinity aceito.
-- ⏳ Política/instalador para operações privilegiadas tipadas em `/opt` e sujeito MCP fixo; root global somente como modo avançado.
+- ✅ Entrada experimental `scripts/install-infinity.sh`, com política de operações de arquivo privilegiadas em `/opt` e controlador protegido em `/srv/portico-infinity`.
+- ✅ `--local-only` não inicia contêineres; instalador de prévia antigo desativado por segurança.
+- ⏳ Aceite E2E real do Broker, autenticação por sujeito MCP, revogação externa e recuperação; root global somente como modo avançado separado.
 - ⏳ Auditoria, revogação externa e E2E real no SRV-IA.
 
 O instalador histórico `scripts/install.sh` ainda corresponde ao comportamento do Community. Evite instalá-lo como se o Infinity estivesse pronto.

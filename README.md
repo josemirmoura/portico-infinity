@@ -32,7 +32,7 @@ The protected control-plane checkout lives in **`/srv/portico-infinity`**, owned
 
 Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.
 
-An **experimental** opt-in wrapper, `scripts/install-infinity-preview.sh`, configures persistent static `/opt` read/write/scoped work through inherited Community features, but does **not** configure privileged file actions or a root/sudo shell and has no Infinity E2E acceptance yet. It must not be advertised as full Infinity.
+The experimental entrypoint is now **`scripts/install-infinity.sh`**. It adds an opt-in `/opt` privileged-file policy, requires an isolated root-owned control plane in `/srv/portico-infinity`, and still **does not grant sudo/root shell or apt**. `--local-only` is a configuration preview that never starts privileged Docker. The previous `scripts/install-infinity-preview.sh` is permanently disabled because it did not enforce the `/srv` boundary. **No Infinity E2E acceptance has been completed.**
 
 ## License and origin
 
