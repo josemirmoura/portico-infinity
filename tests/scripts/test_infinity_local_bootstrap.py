@@ -91,7 +91,7 @@ class InfinityLocalBootstrapTest(unittest.TestCase):
         policy = (self.root / "config" / "policy.yaml").read_text()
         self.assertIn("    - chmod", policy)
         self.assertIn("    - chown", policy)
-        self.assertNotIn("    - remove_recursive", policy)
+        self.assertIn("    - remove_recursive", policy)
         self.assertIn("full_mode_enabled: false", policy)
         self.assertIn("run_as: infinity-test", policy)
         self.assertIn("  admin: broker-only", policy)
