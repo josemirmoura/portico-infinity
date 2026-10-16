@@ -60,12 +60,8 @@ func main() {
 	add := func(name string, allowed bool, args map[string]any) {
 		resp, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		passed := callErr == nil && resp != nil && resp.IsError != allowed
-		// Tools disabled by policy may not be registered by the Gateway at all.
-		// MCP rejects those calls at the transport layer (unknown tool), which
-		// is a stronger denial than returning an in-band IsError response.
-		if !allowed && callErr != nil && strings.Contains(callErr.Error(), "unknown tool") {
-			passed = true
-		}
+		// Verify the real, registered MCP tool returns an in-band denial.
+		// An unknown tool is a test bug, not evidence of policy enforcement.
 		r := result{Case: name, Passed: passed}
 		if !passed {
 			if callErr != nil {
@@ -95,7 +91,7 @@ func main() {
 	add("package.install", false, map[string]any{"name": "curl"})
 	add("shell.exec_admin", false, map[string]any{"command": "id", "cwd": *directory, "grant_id": "invalid"})
 	add("service.restart", false, map[string]any{"name": "docker.service"})
-	add("docker.restart", false, map[string]any{"name": "portico-infinity-broker-1"})
+	add("docker.action", false, map[string]any{"name": "portico-infinity-broker-1", "action": "restart"})
 	add("file.remove", true, map[string]any{"path": target})
 	// A wrong token must not establish a live MCP session.
 	badTr := &mcp.StreamableClientTransport{
