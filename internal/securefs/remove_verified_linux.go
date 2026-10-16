@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/sensitive"
 	"golang.org/x/sys/unix"
 )
 
@@ -53,7 +53,7 @@ func (m *Manager) RemoveRecursiveVerified(target string, check func(string, bool
 	removed := uint64(0)
 	err = verifiedRemoveEntry(parentFD, filepath.Base(rel), filepath.Clean(target), check, &removed, 0)
 	if err != nil && removed != 0 {
-		return fmt.Errorf("%w (entries_unlinked=%d, target=%s): %v", ErrPartialRemoval, removed, target, err)
+		return fmt.Errorf("%w (entries_unlinked=%d, target=%s): %w", ErrPartialRemoval, removed, target, err)
 	}
 	return err
 }
@@ -100,7 +100,7 @@ func verifiedRemoveEntry(parentFD int, name, canonical string, check func(string
 		return fmt.Errorf("recursive removal refused nested mount: %s", canonical)
 	}
 	mode := uint32(info.Mode) & unix.S_IFMT
-	secret := protectedEntryName(canonical) || (mode == unix.S_IFREG && info.Nlink > 1)
+	secret := sensitive.ProtectedName(canonical) || (mode == unix.S_IFREG && info.Nlink > 1)
 	if mode != unix.S_IFDIR && mode != unix.S_IFREG && mode != unix.S_IFLNK {
 		return fmt.Errorf("recursive removal refused special file: %s", canonical)
 	}
@@ -162,16 +162,3 @@ func verifiedRemoveEntry(parentFD int, name, canonical string, check func(string
 	return nil
 }
 
-// Keep classification local to the low-level layer so that it is checked
-// again immediately before unlink, independently of the Broker preflight.
-func protectedEntryName(path string) bool {
-	name := filepath.Base(filepath.Clean(path))
-	if name == ".env" {
-		return true
-	}
-	switch name {
-	case ".env.example", ".env.sample", ".env.template":
-		return false
-	}
-	return strings.HasPrefix(name, ".env.")
-}
