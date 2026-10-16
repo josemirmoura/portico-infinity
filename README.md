@@ -4,7 +4,7 @@
 
 > ⚠️ **PRÉ-LANÇAMENTO.** O perfil Infinity de operações privilegiadas confinadas a `/opt` ainda precisa de validação E2E; o root global irrestrito será opcional e ficará desativado por padrão. Este repositório preserva o código histórico do Community, mas não comprova uma instalação Infinity pronta para uso. Não execute em um servidor de produção sem validação E2E independente.
 
-[Português (Brasil)](README.pt-BR.md) · [Community original](https://github.com/josemirmoura/mcp-vps-agent-gateway)
+[Português (Brasil)](README.pt-BR.md) · [Community repository](https://github.com/josemirmoura/portico-community)
 
 ## Target
 
@@ -18,12 +18,17 @@
 
 ## Documents
 
+- [Competitive benchmark, engineering priorities and MCP client neutrality](docs/infinity/BENCHMARK-E-PLANO-COMPETITIVO.md) (PT-BR)
 - [Architecture and threat boundaries](docs/infinity/ARCHITECTURE.md)
 - [Persistent administrative authority specification](docs/infinity/ROOT_PERSISTENTE.md)
 - [Acceptance gates](docs/infinity/ACCEPTANCE.md)
 - [Disposable E2E and protected installation checklist (PT-BR)](docs/infinity/FIRST_E2E.md)
 - [Owner-only emergency stop runbook (PT-BR)](docs/infinity/EMERGENCY_STOP.md)
 - [Import provenance and remaining references](docs/infinity/IMPORT.md)
+
+## Compatibility beyond ChatGPT
+
+Infinity targets **standards-based MCP clients and agent hosts**, including prospective Claude, Cursor, VS Code/Copilot and local orchestrators, subject to actual client/version/OAuth/tool-call E2E evidence. An LLM without an MCP-capable host cannot connect by itself. This is a direction, not certification. See the [competitive engineering plan](docs/infinity/BENCHMARK-E-PLANO-COMPETITIVO.md).
 
 ## Installation layout
 
@@ -37,11 +42,11 @@ The independent Infinity OAuth E2E with real ZITADEL, PostgreSQL, HTTPS, issued 
 
 Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. The Infinity-specific shell workspace confinement fix was merged in commit `76dbeec0f8b1eae992617ab008726273b026eca5` and tested in a disposable Docker E2E; operator deployment remains pending. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.
 
-The experimental entrypoint is now **`scripts/install-infinity.sh`**. It adds an opt-in `/opt` privileged-file policy, requires an isolated root-owned control plane in `/srv/portico-infinity`, and still **does not grant sudo/root shell or apt**. `--local-only` is a configuration preview that never starts privileged Docker. The previous `scripts/install-infinity-preview.sh` is permanently disabled because it did not enforce the `/srv` boundary. **The disposable Infinity Docker/OAuth acceptance was completed**; the SRV-IA installation is **partially validated**. The SHELL-001 source fix is merged but has **not yet been deployed on SRV-IA**. See [SRV-IA shell upgrade](docs/infinity/UPGRADE-SHELL-001-SRV-IA.md).
+The experimental entrypoint is now **`scripts/install-infinity.sh`**. It adds an opt-in `/opt` privileged-file policy, requires an isolated root-owned control plane in `/srv/portico-infinity`, and still **does not grant sudo/root shell or apt**. `--local-only` is a configuration preview that never starts privileged Docker. The previous `scripts/install-infinity-preview.sh` is permanently disabled because it did not enforce the `/srv` boundary. **The disposable Infinity Docker/OAuth acceptance was completed**; the SRV-IA installation is **partially validated**. The SHELL-001 fix has now been deployed and non-root shell was validated on SRV-IA (see the [16 October field report](docs/infinity/RELATO-SRV-IA-2026-10-16.md)); full operational acceptance remains pending. Large-tree DELETE-001 is still open ([Issue #6](https://github.com/josemirmoura/portico-infinity/issues/6)). See [SRV-IA shell upgrade](docs/infinity/UPGRADE-SHELL-001-SRV-IA.md).
 
 ## License and origin
 
-Derived from [Pórtico MCP Community](https://github.com/josemirmoura/mcp-vps-agent-gateway), by Josemir Moura, under Apache-2.0. Source LICENSE and attribution remain preserved. Git history is retained in `main`. Public repo access is not permission to access an operator's machine: the operator must authenticate and consent locally.
+Derived from [Pórtico MCP Community](https://github.com/josemirmoura/portico-community), by Josemir Moura, under Apache-2.0. Source LICENSE and attribution remain preserved. Git history is retained in `main`. Public repo access is not permission to access an operator's machine: the operator must authenticate and consent locally.
 
 ## Inherited Community installation contract (not yet Infinity certification)
 
