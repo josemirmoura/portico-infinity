@@ -1,147 +1,34 @@
-# Portico MCP Community
+# Pórtico Infinity ♾️
 
-**Connect one compatible web AI chat to one Linux computer with server-enforced policy and audit.**
+**Edição pública experimental do Pórtico Community para administração persistente de um Linux por uma IA autenticada via MCP.**
 
-This repository contains the public Portico Community runtime.
+> ⚠️ **PRÉ-LANÇAMENTO.** O acesso administrativo root permanente ainda está em desenvolvimento. Este repositório preserva o código histórico do Community, mas não comprova uma instalação Infinity pronta para uso. Não execute em um servidor de produção sem validação E2E independente.
 
-The current validated product path connects ChatGPT Web or another compatible MCP client to a single Linux host through an unprivileged Gateway and a privileged local Broker. The machine owner defines authority; the Broker enforces it.
+[Português (Brasil)](README.pt-BR.md) · [Community original](https://github.com/josemirmoura/mcp-vps-agent-gateway)
 
-> **Status: pre-release Community candidate.** Ubuntu 24.04 workflows validate disposable runtime/package paths. A real user-facing ChatGPT Web/mobile acceptance, verified signed release assets, stable reliability and the final Community license are separate open gates.
+## Target
 
-## Community product boundary
+- Operator-owned, opt-in, **non-expiring** authorization for read/write and ordinary work inside `/opt`.
+- Optional, separately enabled, **persistent privileged execution** for one explicitly authenticated MCP principal. This is planned, **not yet implemented**.
+- HTTPS, OAuth/OIDC, local Broker enforcement, audit trail, out-of-band emergency shutdown and revocation.
+- Ubuntu/Linux as the first target; optional outbound secure tunnel for machines without fixed public IP.
+- Distinct deployments, state, service identities and configuration from Pórtico Community and Cloud.
 
-Portico Community is intentionally focused:
+**Important:** a root shell can act outside `/opt`; `/opt` is the default work directory, not a security boundary for root. Persistent server authorization does not disable OAuth token expiry, ChatGPT/tool confirmations, execution timeouts or chat session limits.
 
-```text
-one compatible web AI chat
-        |
-        | HTTPS + MCP Streamable HTTP + OAuth/OIDC
-        v
-Portico Gateway
-        |
-        | protected local Unix socket
-        v
-Portico Broker
-        |
-        v
-one Linux computer
-```
+## Documents
 
-That Linux computer can be a VPS, workstation or server.
+- [Architecture and threat boundaries](docs/infinity/ARCHITECTURE.md)
+- [Persistent administrative authority specification](docs/infinity/ROOT_PERSISTENTE.md)
+- [Acceptance gates](docs/infinity/ACCEPTANCE.md)
+- [Import provenance and remaining references](docs/infinity/IMPORT.md)
 
-The Community package is self-hosted. It does not require a managed Portico Cloud control plane.
+## Implementation status
 
-## What it solves
+Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.
 
-Without a trusted execution path, server work with an AI becomes a manual relay: generate command, switch to terminal, run it, copy results back and repeat.
+An **experimental** opt-in wrapper, `scripts/install-infinity-preview.sh`, configures persistent static `/opt` read/write/scoped work through inherited Community features, but does **not** grant root/sudo and has no Infinity E2E acceptance yet. It must not be advertised as full Infinity.
 
-Portico closes that loop while keeping authorization on the owner-controlled machine. Depending on local policy, the AI client can inspect files, diagnose services, work with Docker/Compose, execute bounded shell/jobs and use other typed operations.
+## License and origin
 
-The supported path does not require handing the AI a VPS password, private SSH key or Docker socket.
-
-## Security model
-
-**The LLM is never the security boundary. The machine decides.**
-
-Core properties:
-
-- Gateway runs non-root;
-- Gateway does not receive the host filesystem root or Docker socket;
-- Broker is reachable only through a protected local Unix socket;
-- Broker re-authorizes privileged requests against local policy;
-- filesystem traversal and symlink escapes are denied;
-- writes use operation journaling/idempotency semantics where applicable;
-- destructive or administrative capabilities require explicit policy;
-- protected secrets are not returned through generic tools;
-- audit records privileged operations.
-
-## Requirements
-
-For the current supported path:
-
-- Linux host; Ubuntu 24.04 LTS is the release-candidate validated target;
-- Docker Engine 24+ and Docker Compose v2/v5;
-- Git, OpenSSL, Python 3 and curl;
-- public DNS + valid HTTPS for the MCP endpoint;
-- a compatible web AI/MCP client with the required custom MCP capability available.
-
-Client capability can vary by account, workspace, plan and rollout. Compatibility claims are evidence-based, not inferred only from a subscription label. See [Compatibility](docs/compatibility.md).
-
-## Quick start
-
-```bash
-git clone https://github.com/josemirmoura/mcp-vps-agent-gateway.git
-cd mcp-vps-agent-gateway
-bash scripts/install.sh
-```
-
-The guided flow covers prerequisites, authority scope, containers, local verification, HTTPS/OAuth, AI-client connection and a real audited MCP call. It prints `INSTALLATION COMPLETE` only after the end-to-end completion gate succeeds.
-
-See:
-
-- [Quick Start](docs/quick-start.md) | [Português (Brasil)](docs/quick-start.pt-BR.md)
-- [First installation, step-by-step acceptance](docs/first-install-acceptance.md) | [Português (Brasil)](docs/first-install-acceptance.pt-BR.md)
-- [Installation contract](docs/installation-contract.md) | [Português (Brasil)](docs/installation-contract.pt-BR.md)
-- [Installation flow](docs/installer-flow.md) | [Português (Brasil)](docs/installer-flow.pt-BR.md)
-- [Connect AI clients: ChatGPT, Claude, Cursor and VS Code](docs/connect-ai-clients.md) | [Português (Brasil)](docs/connect-ai-clients.pt-BR.md)
-- [ChatGPT integration](docs/chatgpt-integration.md) | [Português (Brasil)](docs/chatgpt-integration.pt-BR.md)
-
-## Authority
-
-The package exposes a broad toolbox, while the owner chooses what the AI may operate.
-
-Examples:
-
-```text
-one project:       /opt/my-app
-several roots:     /opt/app + /var/www/site + /srv/data
-whole filesystem:  /
-```
-
-Filesystem is only one dimension. Policy separately governs shell roots, systemd units, Docker/Compose resources, network, packages, users/groups, firewall and temporary administration.
-
-## Operations
-
-```bash
-bash scripts/diagnose.sh status
-bash scripts/diagnose.sh health
-bash scripts/diagnose.sh logs 200
-bash scripts/diagnose.sh audit 100
-
-bash scripts/update.sh
-bash scripts/remove.sh safe
-```
-
-Stable SemVer tags are the normal production update channel after stable release. The updater preserves operator configuration/state, validates the new runtime and rolls back on verification failure where supported.
-
-## Public roadmap
-
-This repository may evolve the Community runtime and public interoperability contracts over time. Broader Portico products may add managed multi-node capabilities separately.
-
-Public roadmap commitments are intentionally limited to features that are released, required for interoperability, or explicitly approved for public announcement. See [Public roadmap](docs/roadmap-multinode-control-plane.md).
-
-## Optional Portico Cloud connector
-
-The public node runtime now includes an optional outbound Cloud connector. It enrolls a Linux node with a local Ed25519 identity, leases signed managed tasks, renews long-running leases and submits every operation to the same local Broker policy boundary.
-
-See [Portico Cloud node connector](docs/cloud-node-connector.md).
-
-## Documentation
-
-- [Documentation map](docs/README.md)
-- [Product model](docs/product-model.md)
-- [Architecture](docs/architecture.md)
-- [Security release matrix](docs/security-release.md)
-- [Privacy and telemetry](docs/privacy.md)
-- [Operations](docs/operations.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Release policy](docs/releases.md)
-- [Support](docs/support.md)
-
-## License
-
-The current public pre-release line is distributed under **Apache-2.0**. See [LICENSE](LICENSE).
-
-The licensing model for future stable Community releases is under review. Historical Apache-2.0 grants remain governed by the terms under which those versions were published.
-
-Português: [README.pt-BR.md](README.pt-BR.md).
+Derived from [Pórtico MCP Community](https://github.com/josemirmoura/mcp-vps-agent-gateway), by Josemir Moura, under Apache-2.0. Source LICENSE and attribution remain preserved. Git history is retained in `main`. Public repo access is not permission to access an operator's machine: the operator must authenticate and consent locally.
