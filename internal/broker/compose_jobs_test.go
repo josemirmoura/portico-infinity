@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/jobs"
-	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/state"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/wire"
 )
 
