@@ -25,7 +25,7 @@ class InfinityLifecycleDenialTests(unittest.TestCase):
         self.log = self.base / "docker.log"
         for name in ("docker", "git"):
             script = bindir / name
-            script.write_text("#!/bin/sh\necho "$0 $*" >> "$INFINITY_LIFECYCLE_LOG"\nexit 0\n")
+            script.write_text('#!/bin/sh\\necho "$0 $*" >> "$INFINITY_LIFECYCLE_LOG"\\nexit 0\\n')
             script.chmod(0o755)
         self.env = dict(os.environ)
         self.env["PATH"] = str(bindir) + os.pathsep + self.env.get("PATH", "")
