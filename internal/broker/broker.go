@@ -452,7 +452,13 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 			return deny(req.ID, "permission_denied", action+" is disabled by policy")
 		}
 		return b.fileMutation(ctx, req, in, func() (any, error) {
-			err := fs.Remove(req.Resource, in.Recursive)
+			var entryGuard func(string, os.FileInfo) error
+			if in.Recursive {
+				entryGuard = func(path string, info os.FileInfo) error {
+					return b.authorizeSensitiveDeletionEntry(ctx, req.Subject, path, info)
+				}
+			}
+			err := fs.RemoveWithEntryGuard(req.Resource, in.Recursive, entryGuard)
 			return map[string]any{"path": req.Resource, "removed": err == nil, "recursive": in.Recursive}, err
 		})
 	case "file.chmod":
