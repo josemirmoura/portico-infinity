@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,6 +42,19 @@ func main() {
 		!strings.HasPrefix(*directory, "/opt/infinity-e2e-") || *output == "" {
 		fmt.Fprintln(os.Stderr, "E2E must use local 127.0.0.1, an /opt/infinity-e2e-* directory and a lab token")
 		os.Exit(2)
+	}
+	lab, err := os.OpenRoot(*directory)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cannot open disposable E2E root: %v\\n", err)
+		os.Exit(1)
+	}
+	defer lab.Close()
+	readLabProof := func(name string) (string, error) {
+		file, openErr := lab.Open(name)
+		if openErr != nil { return "", openErr }
+		defer file.Close()
+		bytes, readErr := io.ReadAll(io.LimitReader(file, 256))
+		return string(bytes), readErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -89,6 +103,49 @@ func main() {
 	add("file.write", false, map[string]any{"path": "/etc/portico-infinity-escape.txt", "content": "ESCAPE"})
 	add("file.write", false, map[string]any{"path": filepath.Join(*directory, "..", "..", "srv", "portico-infinity", "escape"), "content": "ESCAPE"})
 	add("package.install", false, map[string]any{"name": "curl"})
+	// The shell must start a real non-root transient systemd job. Verify a
+	// durable filesystem result, not only a successful MCP job-creation reply.
+	add("shell.exec", true, map[string]any{
+		"command": "printf shell-ok > shell-proof.txt", "cwd": *directory,
+		"runtime_seconds": 20,
+	})
+	shellPassed := false
+	for attempt := 0; attempt < 40; attempt++ {
+		if data, readErr := readLabProof("shell-proof.txt"); readErr == nil && data == "shell-ok" {
+			shellPassed = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	results = append(results, result{Case: "shell.exec real non-root workspace proof", Passed: shellPassed})
+	fail = fail || !shellPassed
+	// The .env fixture is intentionally Unix-readable; a successful DENIED
+	// result therefore proves the systemd mask rather than mode bits alone.
+	add("shell.exec", true, map[string]any{
+		"command": "if cat .env >/dev/null 2>&1; then printf LEAKED > secret-access.txt; else printf DENIED > secret-access.txt; fi",
+		"cwd": *directory, "runtime_seconds": 20,
+	})
+	secretDenied := false
+	for attempt := 0; attempt < 40; attempt++ {
+		if data, readErr := readLabProof("secret-access.txt"); readErr == nil {
+			secretDenied = data == "DENIED"
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	results = append(results, result{Case: "shell.exec blocks Unix-readable .env", Passed: secretDenied})
+	fail = fail || !secretDenied
+	add("shell.exec", false, map[string]any{
+		"command": "id -u", "cwd": "/opt", "runtime_seconds": 20,
+	})
 	add("shell.exec_admin", false, map[string]any{"command": "id", "cwd": *directory, "grant_id": "invalid"})
 	add("service.restart", false, map[string]any{"name": "docker.service"})
 	add("docker.action", false, map[string]any{"name": "portico-infinity-broker-1", "action": "restart"})

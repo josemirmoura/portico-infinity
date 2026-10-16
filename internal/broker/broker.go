@@ -1154,6 +1154,14 @@ func (b *Broker) startShellJob(ctx context.Context, req wire.Request, admin bool
 		return deny(req.ID, "state_error", rootsErr.Error())
 	}
 	isolateFilesystem := !admin && !b.Policy.ShellMayReadHost()
+	// Infinity isolates a shell to its explicitly chosen workspace. Scanning
+	// only that subtree and mounting only that subtree must remain coupled:
+	// scanning less while mounting all of /opt would expose sibling secrets.
+	readOnly, readWrite, scopeErr := infinityShellWorkspaceRoots(in.CWD, isolateFilesystem, readOnly, readWrite)
+	if scopeErr != nil {
+		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
+		return deny(req.ID, "permission_denied", scopeErr.Error())
+	}
 	inaccessible := []string(nil)
 	if !isolateFilesystem && !b.Policy.ShellMayReadHost() {
 		inaccessible = scopedInaccessiblePaths()
