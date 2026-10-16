@@ -148,3 +148,22 @@ func TestSubtreeScanHostRootMapping(t *testing.T) {
 		t.Fatalf("host mapping mismatch: path=%s err=%v", found, err)
 	}
 }
+
+
+func TestSubtreeScanRejectsSymlinkedAuthorizedRootAncestor(t *testing.T) {
+	base := t.TempDir()
+	real := t.TempDir()
+	authorizedReal := filepath.Join(real, "project")
+	if err := os.MkdirAll(filepath.Join(authorizedReal, "tree"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "linked")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	authorized := filepath.Join(link, "project")
+	target := filepath.Join(authorized, "tree")
+	if err := WalkProtectedSubtree("", target, []string{authorized}, func(string) error { return nil }); err == nil {
+		t.Fatal("symlinked ancestor of authorized root must be rejected")
+	}
+}
