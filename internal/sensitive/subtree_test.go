@@ -86,7 +86,7 @@ func TestVisitProtectedSubtreeVisitorFailureAndUnverifiablePathsFailClosed(t *te
 	if err := VisitProtectedSubtree("", tree, func(string) error { return denied }); !errors.Is(err, denied) {
 		t.Fatalf("visitor rejection must abort: %v", err)
 	}
-	for _, candidate := range []string{"tree", "/does-not-exist", filepath.Join(root, "..", filepath.Base(root), "tree")} {
+	for _, candidate := range []string{"tree", "/does-not-exist", root + "/../" + filepath.Base(root) + "/tree"} {
 		if err := VisitProtectedSubtree("", candidate, func(string) error { return nil }); err == nil {
 			t.Fatalf("invalid or unsafe target accepted: %q", candidate)
 		}
