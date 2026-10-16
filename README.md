@@ -23,6 +23,10 @@
 - [Acceptance gates](docs/infinity/ACCEPTANCE.md)
 - [Import provenance and remaining references](docs/infinity/IMPORT.md)
 
+## Installation layout
+
+The protected control-plane checkout lives in **`/srv/portico-infinity`**, owned by root and inaccessible for writes by the AI shell account. AI projects reside inside **`/opt`**. This separation is a defense-in-depth decision, pending full E2E verification.
+
 ## Implementation status
 
 Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.

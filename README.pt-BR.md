@@ -17,6 +17,13 @@ A autenticação HTTPS/OAuth continua obrigatória. A autorização não implica
 
 **⚠️ Operações sobre `/opt` também apresentam riscos**, especialmente se a pasta contiver configurações, executáveis ou arquivos que algum serviço privilegiado utilizará. Root global alcança todo o host, inclusive fora de `/opt`. O risco inclui perda de dados, comprometimento de credenciais, alterações nos serviços e execução de instruções maliciosas encontradas em arquivos. O desligamento de emergência e auditoria devem ter componentes externos à máquina administrada.
 
+## Diretórios separados
+
+- **`/srv/portico-infinity`**: instalação e plano de controle, com acesso restrito a root.
+- **`/opt`**: projetos e arquivos administrados pela IA.
+
+O diretório de instalação fica propositalmente fora da área delegada. Esse isolamento ainda exige testes E2E e revisão de permissões efetivas, incluindo contas de serviço.
+
 ## Estado da implementação
 
 - ✅ Repositório público independente e histórico `main` do Community importado.

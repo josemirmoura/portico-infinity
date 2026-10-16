@@ -36,7 +36,7 @@ O proprietário autoriza explicitamente uma instância/sujeito diferente ou pol�
 
 ## Instalação e separação de projetos
 
-Checkout Infinity previsto em `/opt/portico-infinity`, independente de `/opt/portico-community` e `/opt/portico-cloud`. O **plano de controle efetivo**, seus segredos e mecanismo de revogação precisam estar protegidos fora da área editável ou ser geridos externamente.
+**Decisão de instalação:** código-fonte e plano de controle em `/srv/portico-infinity`, fora do teto de trabalho da IA (`/opt`), com propriedade `root:root` e acesso negado ao usuário de execução. Os arquivos `.env`, `config/policy.yaml`, estado e credenciais pertencem exclusivamente ao runtime protegido. `/opt` permanece reservado a projetos da IA. Community (`/opt/portico-community`) e Cloud (`/opt/portico-cloud`) continuam independentes. A infraestrutura externa de revogação deve permanecer fora da autoridade do MCP.
 
 No SRV-IA sem IP fixo, preferir túnel HTTPS de saída e identidade OAuth dedicada. O runtime da VPS atual e o Community permanecem intocados.
 

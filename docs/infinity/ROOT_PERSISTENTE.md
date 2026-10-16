@@ -8,14 +8,14 @@ No laboratório SRV-IA, dar à IA acesso persistente, sem renovação temporal, 
 
 ## Decisão de engenharia
 
-**Padrão Infinity: `opt-privileged`, sem shell root arbitrário.**
+**Padrão Infinity: `opt-privileged`, sem shell root arbitrário. Instalação do controlador em `/srv/portico-infinity`.**
 
 - `/opt` é raiz estática de leitura/escrita e de shell **não-root**; não depende de concessões dinâmicas com TTL.
 - O **Broker privilegiado** recebe operações *tipadas*, aplica política por identidade, ferramenta, ação e caminho e restringe acesso aos descritores permitidos em `/opt`. A implementação herdada já inclui `file.chmod`, `file.chown`, `file.write`, `file.patch`, `file.remove` e operações de leitura; a permissão de cada ação deve ser habilitada conscientemente e validada.
 - `shell.exec` continua rodando com identidade não-root confinada. **Não** criar `sudo NOPASSWD:ALL`, não disponibilizar `bash`/Python root com simples `cwd=/opt`, não usar `chroot` sozinho como garantia de isolamento.
 - Todas as chamadas mantêm autenticação OAuth, identidade MCP fixa, auditoria, limites por execução, controle de concorrência e revogação via operador externo ao MCP.
 - `shell.exec_admin` global, `Full`, pacotes APT, firewall, gestão de usuários, systemd global, Docker privilegiado e escape de rede permanecem desativados no perfil padrão. Se necessário, uma **edição avançada root global** será um modo separado, opt-in explícito, jamais fallback automático.
-- Segredos protegidos continuam sujeitos às políticas específicas do Broker. Evitar guardar controles de revogação exclusivamente sob `/opt`.
+- O checkout e o plano de controle ficam em `/srv/portico-infinity` com proprietário root e sem permissão de escrita do usuário da IA; o Broker só recebe o bind de trabalho de `/opt`. Segredos protegidos continuam sujeitos às políticas específicas do Broker, e a revogação deve ter componente externo.
 
 Isso atende à maior parte das tarefas de desenvolvimento, criação, edição, propriedade e manutenção de projetos. Não permite todos os comandos possíveis com sudo. Quando uma atividade exigir alterar `/usr`, `/etc`, o kernel ou outro serviço global, ela será deliberadamente tratada à parte.
 
@@ -41,7 +41,8 @@ O isolamento implementável consiste em **não conceder root genérico** e expor
 5. Testar leitura, escrita, exclusão deliberada, `chmod` e `chown` sobre dados descartáveis com auditoria e resultados idempotentes onde couber.
 6. Bloquear `shell.exec_admin`, `Full`, `sudo` root, Docker privilegiado e rotas indiretas de elevação no perfil padrão.
 7. Comprovar reconexão/reboot sem expirar política, ao lado de revogação/recuperação pelo operador externo.
-8. Executar a suíte em ambiente descartável e depois o E2E no SRV-IA.
+8. Instalar o Pórtico em `/srv/portico-infinity`, separado do `/opt` delegável, e comprovar negação de acesso do usuário executor ao checkout.
+9. Executar a suíte em ambiente descartável e depois o E2E no SRV-IA.
 
 **Situação:** configuração conceitual definida; operações privilegiadas tipadas e infraestrutura de confinamento já existem no Community, mas o perfil Infinity ainda não foi homologado. Nenhuma permissão nova foi aplicada ao SRV-IA.
 
