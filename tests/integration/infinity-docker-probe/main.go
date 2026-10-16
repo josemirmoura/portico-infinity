@@ -60,11 +60,21 @@ func main() {
 	add := func(name string, allowed bool, args map[string]any) {
 		resp, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		passed := callErr == nil && resp != nil && resp.IsError != allowed
+		// Tools disabled by policy may not be registered by the Gateway at all.
+		// MCP rejects those calls at the transport layer (unknown tool), which
+		// is a stronger denial than returning an in-band IsError response.
+		if !allowed && callErr != nil && strings.Contains(callErr.Error(), "unknown tool") {
+			passed = true
+		}
 		r := result{Case: name, Passed: passed}
-		if callErr != nil {
-			r.Detail = callErr.Error()
-		} else if resp != nil && resp.IsError != allowed {
-			r.Detail = fmt.Sprintf("unexpected IsError=%t", resp.IsError)
+		if !passed {
+			if callErr != nil {
+				r.Detail = callErr.Error()
+			} else if resp != nil {
+				r.Detail = fmt.Sprintf("unexpected IsError=%t", resp.IsError)
+			} else {
+				r.Detail = "missing MCP tool response"
+			}
 		}
 		results = append(results, r)
 		if !passed {
