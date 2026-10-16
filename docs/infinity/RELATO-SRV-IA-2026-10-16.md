@@ -40,3 +40,19 @@ A prova `PROVA.txt` foi preservada, atualizada com a etapa `editado e relido via
 - Testes inofensivos de leitura, escrita e tentativa de escape são úteis; aprovação de shell exige verificação separada.
 - Evitar utilizar um servidor de produção como laboratório de exploração; manter um plano externo de parada e recuperação.
 - Este documento registra uma sessão específica, não autoriza divulgar o produto como estável.
+
+
+## Complemento: aplicação real e shell funcional no SRV-IA (16/10/2026, 16:49–16:52 UTC)
+
+O operador confirmou checkout original `77be00a3f8aab29fc2efdd3254dc3b6cadb85666` e overlays Compose `compose.yaml` + `compose.infinity-auth.remote.yaml`. Pelo console do SRV-IA, aplicou o commit da correção `76dbeec0f8b1eae992617ab008726273b026eca5`, reconstruindo Broker e Gateway. O comando `audit-status` do Broker retornou `valid=true`, `events=587`. A saída copiada terminou logo após essa prova; **não registrou o banner final do script nem o caminho do backup**. É necessário confirmar `git rev-parse HEAD`, serviços e backup em SSH antes de certificar o procedimento inteiro.
+
+Testes MCP executados após a atualização:
+- `system.health`: OK, audit_chain_ok=true.
+- `shell.exec` em diretório experimental: iniciou job no systemd e executou com `uid=999`, `user=portico-infinity-exec`; `shell-status=OK` e `Deactivated successfully` nos registros.
+- Em subdiretório descartável criado pelo MCP com proprietário UID 999, um segundo shell escreveu `result.txt` com `shell001-write-OK`. Conteúdo confirmado por `file.read`; `/etc/shadow` reportou `DENIED`, UID=999/GID=987.
+- Provas: `vps-agent-job-0db1f803372be246` e `vps-agent-job-b187228c8249dffd`. Arquivos experimentais preservados em `/opt/portico-infinity-e2e-20261016`.
+
+**Conclusão funcional:** SHELL-001 deixou de bloquear o shell no SRV-IA. **Conclusão administrativa:** confirmação final do checkout/backup/identidade dos serviços ainda pendente de leitura pelo operador.
+
+### Nova pendência, não executada nesta rodada
+Exclusão recursiva de `/opt/nara-vui-lab` bloqueada por `sensitive_path_locked: sensitive-path scan exceeded safety limit`; pasta preservada. Registrada em [Issue #6 DELETE-001](https://github.com/josemirmoura/portico-infinity/issues/6) para tratamento após esta homologação, com testes de árvores grandes e proteções de segredos. Não usar `remove.sh` como contorno automático.
