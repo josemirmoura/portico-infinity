@@ -1,0 +1,138 @@
+name: infinity-private-edge-disposable-e2e
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/infinity-vps-edge/**'
+      - 'tests/integration/infinity-edge-mock.mjs'
+      - '.github/workflows/infinity-edge-disposable-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infinity-edge-disposable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start disposable mocks and a dedicated Docker bridge network
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo ip address add 10.88.88.2/32 dev lo
+          docker network create traefik-public
+          node tests/integration/infinity-edge-mock.mjs > "$RUNNER_TEMP/edge-mock.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/edge-mock.pid"
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 1 http://10.88.88.2:18081/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS --max-time 3 http://10.88.88.2:18081/healthz > /dev/null
+
+      - name: Validate isolated Compose project without changing production Traefik
+        shell: bash
+        env:
+          INFINITY_PUBLIC_DOMAIN: infinity.example.invalid
+        run: |
+          set -euo pipefail
+          cd deploy/infinity-vps-edge
+          docker compose config -q
+          docker compose config --format json > "$RUNNER_TEMP/infinity-edge-config.json"
+          python3 - "$RUNNER_TEMP/infinity-edge-config.json" <<'PY'
+          import json,sys
+          cfg=json.load(open(sys.argv[1]))
+          assert cfg["name"]=="portico-infinity-edge"
+          b=cfg["services"]["bridge"]
+          assert "ports" not in b, "host ports unexpectedly published"
+          assert "traefik-public" in b["networks"]
+          mounts=b.get("volumes",[])
+          assert all("docker.sock" not in str(m) for m in mounts)
+          labels=b["labels"]
+          if isinstance(labels,list):
+            labels=dict(v.split("=",1) for v in labels)
+          assert "infinity.example.invalid" in labels["traefik.http.routers.portico-infinity-public.rule"]
+          assert labels["traefik.http.services.portico-infinity-bridge.loadbalancer.server.port"]=="8080"
+          assert labels["traefik.http.routers.portico-infinity-public.tls.certresolver"]=="letsencrypt"
+          assert labels["traefik.docker.network"]=="traefik-public"
+          print("INFINITY_EDGE_COMPOSE_ISOLATION_PASS")
+          PY
+
+      - name: Launch real Traefik private edge and verify three upstream routes
+        shell: bash
+        env:
+          INFINITY_PUBLIC_DOMAIN: infinity.example.invalid
+        run: |
+          set -euo pipefail
+          cd deploy/infinity-vps-edge
+          docker compose up -d
+          for i in $(seq 1 50); do
+            if docker run --rm --network traefik-public curlimages/curl:8.16.0 \
+                -fsS --max-time 2 http://portico-infinity-edge-bridge-1:8080/healthz > "$RUNNER_TEMP/bridge-health.json"; then
+              break
+            fi
+            sleep 1
+          done
+          python3 - "$RUNNER_TEMP/bridge-health.json" <<'PY'
+          import json,sys
+          x=json.load(open(sys.argv[1]))
+          assert x["backend"]=="gateway",x
+          assert x["xForwardedProto"]=="https",x
+          assert x["xForwardedPort"]=="443",x
+          print("INFINITY_EDGE_GATEWAY_PROXY_PASS")
+          PY
+          # Exercise gateway, OIDC, DCR, Login V2 and root rewrite in one routing topology.
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import pathlib,sys
+          base=pathlib.Path(sys.argv[1])
+          cases=[
+            ("/mcp","gateway","/mcp"),
+            ("/.well-known/oauth-protected-resource","gateway","/.well-known/oauth-protected-resource"),
+            ("/oauth/v2/token","zitadel-h2c","/oauth/v2/token"),
+            ("/oauth/v2/register","zitadel-h2c","/oauth/v2/register"),
+            ("/.well-known/openid-configuration","zitadel-h2c","/.well-known/openid-configuration"),
+            ("/v2/users","zitadel-h2c","/v2/users"),
+            ("/ui/v2/login/healthy","login","/ui/v2/login/healthy"),
+            ("/","login","/ui/v2/login/"),
+          ]
+          (base/"edge-cases.txt").write_text("".join("\t".join(c)+"\n" for c in cases))
+          PY
+          while IFS=$'\t' read -r path expected expected_path; do
+            response="$(docker run --rm --network traefik-public \
+                curlimages/curl:8.16.0 -fsS --max-time 15 \
+                -H 'Host: infinity.example.invalid' \
+                "http://portico-infinity-edge-bridge-1:8080$path")"
+            printf '%s\n' "$response" | python3 -c '
+          import json,sys
+          b,p=sys.argv[1:]
+          d=json.load(sys.stdin)
+          assert d["backend"]==b,(b,d)
+          assert d["path"]==p,(p,d)
+          assert d["xForwardedProto"]=="https",d
+          ' "$expected" "$expected_path"
+            echo "PASS: $path -> $expected"
+          done < "$RUNNER_TEMP/edge-cases.txt"
+          # Outer Docker provider would attach here. The dedicated edge has no published port.
+          published="$(docker inspect -f '{{json .HostConfig.PortBindings}}' portico-infinity-edge-bridge-1)"
+          test "$published" = "null" || test "$published" = '{}'
+          echo 'INFINITY_PRIVATE_EDGE_DOCKER_E2E_PASS'
+
+      - name: Sanitize and cleanup isolated Docker lab
+        if: always()
+        shell: bash
+        env:
+          INFINITY_PUBLIC_DOMAIN: infinity.example.invalid
+        run: |
+          docker compose -f deploy/infinity-vps-edge/compose.yaml down --remove-orphans || true
+          docker network rm traefik-public >/dev/null 2>&1 || true
+          if test -s "$RUNNER_TEMP/edge-mock.pid"; then
+            kill "$(cat "$RUNNER_TEMP/edge-mock.pid")" 2>/dev/null || true
+          fi
+          sudo ip address del 10.88.88.2/32 dev lo 2>/dev/null || true
