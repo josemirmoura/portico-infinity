@@ -11,7 +11,7 @@ ChatGPT remoto
 infinity.josemirmoura.com.br         [DNS A proposto; NÃO configurado aqui]
     │
     ▼
-VPS pública srv678294                 [Traefik existente, TLS, porta 443]
+VPS pública <HOSTNAME_VPS>                 [Traefik existente, TLS, porta 443]
     │          serviços de entrada e controle de revogação NÃO delegáveis à IA
     │  WireGuard (iniciado PELO SRV-IA, usando keepalive)
     ▼
@@ -25,7 +25,7 @@ SRV-IA (host local, sem IP público fixo; sem port-forwarding doméstico)
 
 ### Valores propostos, pendentes de verificação de colisões
 
-- DNS: `infinity.josemirmoura.com.br`, registro A → IP público da VPS atualmente observado `85.209.93.51`. **Não criar outro domínio pago**; apenas subdomínio independente de `mcp.josemirmoura.com.br`, que é o Community.
+- DNS: `infinity.josemirmoura.com.br`, registro A → IP público da VPS atualmente observado `<IP_PUBLICO_VPS>`. **Não criar outro domínio pago**; apenas subdomínio independente de `domínio atual do Pórtico Community`, que é o Community.
 - WireGuard (nova interface independente, exemplos a validar antes do uso): `10.88.88.1/30` para VPS e `10.88.88.2/30` para SRV-IA, UDP `51822` na VPS. Não atribuir essas redes sem confirmar que estão livres.
 - Somente o SRV-IA conhece o endpoint público da VPS e inicia o túnel. Atrás do NAT residencial, `PersistentKeepalive = 25` permite manter o mapeamento ativo. A configuração do WireGuard e as chaves ficam fora de `/opt`, root-owned.
 - O serviço de entrada HTTP do SRV-IA escutará **somente no IP do túnel**. Não publicar portas do Gateway nem do provedor OAuth na Internet, na rede doméstica ou no Docker host `0.0.0.0`.
@@ -43,7 +43,7 @@ Todas utilizam o **mesmo hostname OAuth**, com TLS emitido na VPS. O Traefik dec
 | `/ui/v2/login` | ZITADEL Login | Login interativo |
 | `/` (se exigido pelo provedor) | ZITADEL Login | Redirecionamento de tela inicial |
 
-**Cuidado:** o overlay `compose.infinity-auth.yaml` atualmente presume Traefik descobrindo labels Docker localmente. Na topologia proposta o Traefik de borda está em OUTRO host. **É necessário implementar e testar um overlay sem edge local**, expondo apenas os backends por IP da VPN (sem exposição `0.0.0.0`) e publicar regras **File Provider na VPS**. Não rodar `setup-integrated-auth.sh` em produção até essa separação estar validada. Não copiar arquivos/tokens de `mcp.josemirmoura.com.br`.
+**Cuidado:** o overlay `compose.infinity-auth.yaml` atualmente presume Traefik descobrindo labels Docker localmente. Na topologia proposta o Traefik de borda está em OUTRO host. **É necessário implementar e testar um overlay sem edge local**, expondo apenas os backends por IP da VPN (sem exposição `0.0.0.0`) e publicar regras **File Provider na VPS**. Não rodar `setup-integrated-auth.sh` em produção até essa separação estar validada. Não copiar arquivos/tokens de `domínio atual do Pórtico Community`.
 
 ## Etapas de execução, com critérios objetivos
 
