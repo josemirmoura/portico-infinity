@@ -30,6 +30,29 @@ sudo docker compose -p portico-infinity ps
 sudo docker compose -p portico-infinity config --quiet
 ```
 
+## Descoberta da composição ativa no SRV-IA
+
+Em 16/10/2026 a instalação real apresentou `broker`, `gateway` e três serviços ZITADEL (`zitadel-api`, `zitadel-login`, `zitadel-postgres`), com publicação privada pela interface WireGuard `10.88.88.2`. O comando `docker compose ps` pode listar contêineres órfãos de outras composições e **não comprova quais arquivos Compose os criaram**. Portanto, não assumir que `compose.yaml` sozinho descreve a instalação.
+
+Comando de inventário de leitura apenas, seguro para colar no console do SRV-IA (não imprime configurações nem segredos):
+
+```bash
+sudo bash -lc '
+set -euo pipefail
+cd /srv/portico-infinity
+printf "SHA_ATUAL="; git rev-parse HEAD
+printf "ARQUIVOS COMPOSE DOS CONTÊINERES:\\n"
+for c in portico-infinity-broker-1 portico-infinity-gateway-1 portico-infinity-zitadel-api-1; do
+  docker inspect -f "{{.Name}} | project={{index .Config.Labels \"com.docker.compose.project\"}} | workdir={{index .Config.Labels \"com.docker.compose.project.working_dir\"}} | files={{index .Config.Labels \"com.docker.compose.project.config_files\"}}" "$c"
+done
+printf "CHECKOUT_ROOT="; stat -c "%U:%G %a" /srv/portico-infinity
+'
+```
+
+O operador deve confirmar que os labels indicam o mesmo projeto, checkout protegido, base `compose.yaml` e os **arquivos sobrepostos usados de fato**, tipicamente `compose.infinity-auth.remote.yaml` no cenário WireGuard. Reutilizar todos eles, na mesma ordem, na atualização, diagnóstico e rollback. Não gerar `docker compose config` sem `--quiet` nem divulgar o conteúdo de `.env`.
+
+**Atualização restrita:** depois de backup consistente e preflight, reconstruir **somente** `broker` e `gateway`, acrescentando `--no-deps` e `--force-recreate` ao `up -d --build` com os overlays descobertos. `--no-deps` impede que Compose reinicie ou recrie ZITADEL. Certificar que a configuração dos dois serviços permanece equivalente (ports, redes, mounts, políticas, autenticação) antes de aplicar o novo binário. Não utilizar `docker compose down`, `down -v` ou `--remove-orphans` nessa manutenção.
+
 **Condições de avanço:** hostname `srv-ia`; remote oficial esperado; alterações rastreadas inexistentes; layout control-plane `root:root`, conta não-root; contêineres `broker` e `gateway` identificados como exclusivos do Infinity, com diretório Compose correspondente a `/srv/portico-infinity`. Se houver sobreposições Compose de OAuth/túnel, IDENTIFICAR as mesmas opções `-f` usadas na instalação antes de qualquer comando de atualização. Se qualquer verificação divergir, parar e investigar. Não substituir configurações locais, credenciais, volumes ou contas.
 
 ## Preparação e atualização, somente após a pré-checagem
