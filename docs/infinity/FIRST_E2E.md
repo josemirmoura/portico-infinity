@@ -62,6 +62,7 @@ O perfil `--local-only` é apenas **prévia de política, sem inicialização de
 - [ ] HTTPS, identidade OAuth específica, audience/issuer/scopes e autenticação ChatGPT válidos.
 - [ ] Auditoria correspondente a uma chamada autenticada de `system.info`.
 - [ ] Reinício/reconexão mantém a política estática, não a sessão OAuth.
+- [ ] Operador para apenas os serviços Gateway/Broker Infinity por meio de `scripts/infinity-emergency-stop.py --execute`, com etiquetas Docker de proprietário verificadas; consultar [runbook de emergência](EMERGENCY_STOP.md).
 - [ ] Revogação externa interrompe chamadas futuras, com recuperação verificada do serviço e snapshot.
 - [ ] Testar remoção/rollback isolados, sem atingir Community, Cloud ou outros projetos `/opt`.
 

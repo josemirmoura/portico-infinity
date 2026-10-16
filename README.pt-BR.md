@@ -42,6 +42,7 @@ O instalador histórico `scripts/install.sh` ainda corresponde ao comportamento 
 - [Root persistente](docs/infinity/ROOT_PERSISTENTE.md)
 - [Critérios de aceite E2E](docs/infinity/ACCEPTANCE.md)
 - [Roteiro do primeiro E2E e instalação isolada](docs/infinity/FIRST_E2E.md)
+- [Parada de emergência exclusiva do Infinity](docs/infinity/EMERGENCY_STOP.md)
 - [Origem e detalhes da importação](docs/infinity/IMPORT.md)
 
 ## Autoria e licença

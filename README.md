@@ -22,6 +22,7 @@
 - [Persistent administrative authority specification](docs/infinity/ROOT_PERSISTENTE.md)
 - [Acceptance gates](docs/infinity/ACCEPTANCE.md)
 - [Disposable E2E and protected installation checklist (PT-BR)](docs/infinity/FIRST_E2E.md)
+- [Owner-only emergency stop runbook (PT-BR)](docs/infinity/EMERGENCY_STOP.md)
 - [Import provenance and remaining references](docs/infinity/IMPORT.md)
 
 ## Installation layout
