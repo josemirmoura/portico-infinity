@@ -99,3 +99,30 @@ func TestVisitProtectedSubtreeVisitorFailureAndUnverifiablePathsFailClosed(t *te
 		t.Fatalf("nil visitor accepted: %v", err)
 	}
 }
+
+
+func TestVisitProtectedSubtreeRejectsProtectedSymlinkNameWithoutFollowingTarget(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "tree")
+	outside := filepath.Join(base, "outside")
+	if err := os.Mkdir(target, 0700); err != nil { t.Fatal(err) }
+	if err := os.Mkdir(outside, 0700); err != nil { t.Fatal(err) }
+	external := filepath.Join(outside, "safe.txt")
+	if err := os.WriteFile(external, []byte("must remain"), 0600); err != nil { t.Fatal(err) }
+	link := filepath.Join(target, ".env")
+	if err := os.Symlink(external, link); err != nil { t.Fatal(err) }
+
+	var found []string
+	err := VisitProtectedSubtree("", target, func(p string) error {
+		found = append(found, p)
+		return nil
+	})
+	if err != nil { t.Fatal(err) }
+	if len(found) != 1 || found[0] != link {
+		t.Fatalf("protected symlink path missed: %v", found)
+	}
+	b, err := os.ReadFile(external)
+	if err != nil || string(b) != "must remain" {
+		t.Fatalf("preflight followed or changed target: %q, %v", b, err)
+	}
+}
