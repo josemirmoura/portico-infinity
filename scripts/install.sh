@@ -325,9 +325,19 @@ if [ "$INFINITY_OPT" -eq 1 ]; then
     echo "INFINITY DENIED: dedicated --run-as account must differ from checkout owner" >&2
     exit 2
   fi
-  if [ "$LOCAL_ONLY" -ne 1 ] && [ "$(pwd -P)" != "/opt/portico-infinity" ]; then
-    echo "INFINITY DENIED: production checkout must be /opt/portico-infinity" >&2
-    exit 2
+  if [ "$LOCAL_ONLY" -ne 1 ]; then
+    if [ "$(pwd -P)" != "/srv/portico-infinity" ]; then
+      echo "INFINITY DENIED: production checkout must be /srv/portico-infinity" >&2
+      exit 2
+    fi
+    if [ "$owner_uid" -ne 0 ]; then
+      echo "INFINITY DENIED: controller checkout must be owned by root" >&2
+      exit 2
+    fi
+    if [ "$(stat -c '%a' -- .)" = "777" ]; then
+      echo "INFINITY DENIED: world-writable controller checkout" >&2
+      exit 2
+    fi
   fi
 fi
 
@@ -405,7 +415,7 @@ path=Path(sys.argv[1])
 values={
     "COMPOSE_PROJECT_NAME": "portico-infinity",
     "VPS_AGENT_INSTANCE_NAME": "portico-infinity",
-    "VPS_AGENT_INFINITY_PROTECTED_ROOT": "/opt/portico-infinity",
+    "VPS_AGENT_INFINITY_PROTECTED_ROOT": "/srv/portico-infinity",
     "VPS_AGENT_PORT": "18081",
     "VPS_AGENT_GATEWAY_IMAGE": "portico-infinity-gateway:local",
     "VPS_AGENT_BROKER_IMAGE": "portico-infinity-broker:local",
