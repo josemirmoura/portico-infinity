@@ -1,0 +1,7 @@
+# Remote SRV-IA pre-auth Gateway bind. No OAuth/IdP required at this stage.
+# Must be passed AFTER compose.yaml; overrides the original localhost port
+# rather than appending a conflicting one.
+services:
+  gateway:
+    ports: !override
+      - "${INFINITY_WG_BIND_ADDRESS:?set SRV-IA WireGuard IPv4}:18081:8080"
