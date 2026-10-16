@@ -15,6 +15,8 @@ Uso: bash scripts/install-infinity.sh [opções]
   --domain HOST              Domínio público MCP/OAuth
   --operator-email EMAIL     E-mail do operador
   --operator-username NOME   Nome de login
+  --remote-edge              Traefik público externo via túnel WireGuard
+  --wg-bind-address IPv4     IP local da interface WireGuard (obrigatório com --remote-edge)
   --yes --ack-infinity-opt   Aprovação explícita sem prompt
 
 Sem --yes, confirmar digitando: AUTORIZO INFINITY /opt
@@ -28,9 +30,9 @@ ARGS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --local-only|--yes|--ack-infinity-opt)
+    --local-only|--yes|--ack-infinity-opt|--remote-edge)
       ARGS+=("$1"); shift ;;
-    --lang|--run-as|--domain|--operator-email|--operator-username)
+    --lang|--run-as|--domain|--operator-email|--operator-username|--wg-bind-address)
       if [ "$#" -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then
         echo "ERRO: $1 exige valor." >&2; exit 2
       fi
