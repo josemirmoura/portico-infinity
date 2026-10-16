@@ -43,8 +43,7 @@ func WalkProtectedSubtree(hostRoot, target string, allowedRoots []string, visit 
 		return errors.New("target is not below an authorized write root")
 	}
 
-	rootFD, err := unix.Open(hostPath(hostRoot, selected),
-		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	rootFD, err := openAbsoluteDirWithoutSymlinks(hostPath(hostRoot, selected))
 	if err != nil {
 		return fmt.Errorf("open authorized root: %w", err)
 	}
@@ -151,4 +150,28 @@ func inspectTreeEntry(parentFD int, name, canonical string, st *unix.Stat_t, res
 		}
 	}
 	return nil
+}
+
+func openAbsoluteDirWithoutSymlinks(path string) (int, error) {
+	if !filepath.IsAbs(path) {
+		return -1, errors.New("authorized root must be absolute")
+	}
+	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	for _, segment := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		if segment == "" {
+			continue
+		}
+		next, openErr := unix.Openat(fd, segment,
+			unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		if openErr != nil {
+			_ = unix.Close(fd)
+			return -1, fmt.Errorf("authorized root has symlink/unavailable ancestor: %w", openErr)
+		}
+		_ = unix.Close(fd)
+		fd = next
+	}
+	return fd, nil
 }
