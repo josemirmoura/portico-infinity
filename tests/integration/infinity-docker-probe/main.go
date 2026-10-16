@@ -89,6 +89,30 @@ func main() {
 	add("file.write", false, map[string]any{"path": "/etc/portico-infinity-escape.txt", "content": "ESCAPE"})
 	add("file.write", false, map[string]any{"path": filepath.Join(*directory, "..", "..", "srv", "portico-infinity", "escape"), "content": "ESCAPE"})
 	add("package.install", false, map[string]any{"name": "curl"})
+	// The shell must start a real non-root transient systemd job. Verify a
+	// durable filesystem result, not only a successful MCP job-creation reply.
+	proof := filepath.Join(*directory, "shell-proof.txt")
+	add("shell.exec", true, map[string]any{
+		"command": "printf shell-ok > shell-proof.txt", "cwd": *directory,
+		"runtime_seconds": 20,
+	})
+	shellPassed := false
+	for attempt := 0; attempt < 40; attempt++ {
+		if data, readErr := os.ReadFile(proof); readErr == nil && string(data) == "shell-ok" {
+			shellPassed = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	results = append(results, result{Case: "shell.exec real non-root workspace proof", Passed: shellPassed})
+	fail = fail || !shellPassed
+	add("shell.exec", false, map[string]any{
+		"command": "id -u", "cwd": "/opt", "runtime_seconds": 20,
+	})
 	add("shell.exec_admin", false, map[string]any{"command": "id", "cwd": *directory, "grant_id": "invalid"})
 	add("service.restart", false, map[string]any{"name": "docker.service"})
 	add("docker.action", false, map[string]any{"name": "portico-infinity-broker-1", "action": "restart"})
