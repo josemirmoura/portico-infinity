@@ -1,0 +1,47 @@
+name: portico-infinity-edge
+
+# Deploy ONLY on the VPS, separately from the existing production Traefik.
+# Outer Traefik discovers exactly this container through its existing Docker provider.
+services:
+  bridge:
+    image: traefik:v2.11
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 80
+    mem_limit: 128m
+    command:
+      - --log.level=INFO
+      - --entryPoints.infinity-private.address=:8080
+      - --providers.file.filename=/etc/traefik/infinity-upstreams.yml
+      - --providers.file.watch=true
+      - --api=false
+    networks:
+      - traefik-public
+    expose:
+      - "8080"
+    volumes:
+      - type: bind
+        source: ./infinity-upstreams.yml
+        target: /etc/traefik/infinity-upstreams.yml
+        read_only: true
+        bind:
+          create_host_path: false
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.http.routers.portico-infinity-public.rule=Host(`${INFINITY_PUBLIC_DOMAIN:?specify INFINITY_PUBLIC_DOMAIN}`)
+      - traefik.http.routers.portico-infinity-public.entrypoints=websecure
+      - traefik.http.routers.portico-infinity-public.tls=true
+      - traefik.http.routers.portico-infinity-public.tls.certresolver=letsencrypt
+      - traefik.http.routers.portico-infinity-public.priority=1000
+      - traefik.http.routers.portico-infinity-public.service=portico-infinity-bridge
+      - traefik.http.services.portico-infinity-bridge.loadbalancer.server.port=8080
+
+networks:
+  traefik-public:
+    external: true
+    name: traefik-public

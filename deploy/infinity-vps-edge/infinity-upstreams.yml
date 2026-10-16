@@ -1,0 +1,65 @@
+# File Provider configuration for the PRIVATE Infinity bridge Traefik.
+# NOT a config file for the existing VPS Traefik. The public TLS listener is
+# provided by that existing Traefik through the Docker labels in compose.yaml.
+# Backend IP is the WireGuard-only SRV-IA address.
+http:
+  routers:
+    infinity-mcp:
+      entryPoints: [infinity-private]
+      rule: "PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || Path(`/healthz`)"
+      priority: 1000
+      middlewares: [infinity-public-https]
+      service: infinity-gateway
+    infinity-dcr:
+      entryPoints: [infinity-private]
+      rule: "PathPrefix(`/oauth/v2/register`)"
+      priority: 900
+      middlewares: [infinity-public-https, infinity-auth-ratelimit]
+      service: infinity-zitadel-api
+    infinity-oauth:
+      entryPoints: [infinity-private]
+      rule: "PathPrefix(`/oauth/v2`) || PathPrefix(`/oidc/v1`) || PathPrefix(`/v2`) || Path(`/.well-known/openid-configuration`) || Path(`/.well-known/oauth-authorization-server`)"
+      priority: 700
+      middlewares: [infinity-public-https, infinity-auth-ratelimit]
+      service: infinity-zitadel-api
+    infinity-login:
+      entryPoints: [infinity-private]
+      rule: "PathPrefix(`/ui/v2/login`)"
+      priority: 600
+      middlewares: [infinity-public-https]
+      service: infinity-zitadel-login
+    infinity-root:
+      entryPoints: [infinity-private]
+      rule: "Path(`/`)"
+      priority: 500
+      middlewares: [infinity-login-root, infinity-public-https]
+      service: infinity-zitadel-login
+  middlewares:
+    infinity-public-https:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: https
+          X-Forwarded-Port: "443"
+    infinity-login-root:
+      replacePath:
+        path: /ui/v2/login/
+    infinity-auth-ratelimit:
+      rateLimit:
+        average: 30
+        burst: 60
+  services:
+    infinity-gateway:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://10.88.88.2:18081"
+    infinity-zitadel-api:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "h2c://10.88.88.2:18082"
+    infinity-zitadel-login:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://10.88.88.2:18083"
