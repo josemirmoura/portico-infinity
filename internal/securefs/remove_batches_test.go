@@ -1,0 +1,75 @@
+package securefs
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRecursiveRemoveStreamsMultipleDirectoryBatches(t *testing.T) {
+	base := t.TempDir()
+	m, err := New([]string{base}, []string{base}, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "large")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1531; i++ {
+		path := filepath.Join(target, fmt.Sprintf("entry-%06d", i))
+		if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		subdir := filepath.Join(target, fmt.Sprintf("nested-%d", i))
+		if err := os.Mkdir(subdir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(subdir, "leaf"), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	neighbor := filepath.Join(base, "neighbor.txt")
+	if err := os.WriteFile(neighbor, []byte("preserved"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Remove(target, true); err != nil {
+		t.Fatalf("batched removal failed: %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("target remains after recursive removal: %v", err)
+	}
+	if data, err := os.ReadFile(neighbor); err != nil || string(data) != "preserved" {
+		t.Fatalf("unrelated sibling was modified: %q %v", data, err)
+	}
+}
+
+func TestRecursiveRemoveReportsPartialFailureAndKeepsProtectedOutsideTarget(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("test relies on unprivileged filesystem permissions")
+	}
+	base := t.TempDir()
+	m, err := New([]string{base}, []string{base}, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "tree")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cannotOpen := filepath.Join(target, "no-access")
+	if err := os.Mkdir(cannotOpen, 0000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(cannotOpen, 0700)
+	// The exact deletion order is FS-dependent. Irrespective of how many
+	// siblings were removed, an error is mandatory and never signifies success.
+	if err := m.Remove(target, true); err == nil ||
+		(!strings.Contains(err.Error(), "permission") && !strings.Contains(err.Error(), "denied")) {
+		t.Fatalf("expected an explicit deletion error, got %v", err)
+	}
+}
