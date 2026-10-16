@@ -527,7 +527,7 @@ func (m *Manager) Move(src, dst string) error {
 // This operation is NOT atomic. If an external process changes the tree during
 // deletion, it may fail after some items have been removed. The caller must
 // report an uncertain/partial outcome rather than claim rollback.
-func removeTree(root *os.Root, rel string, baseFD int) error {
+func removeTree(root *os.Root, rel string, baseFD int, canonicalRoot string, guard func(string, os.FileInfo) error) error {
 	if err := ensureNoMountCross(baseFD, rel); err != nil {
 		return fmt.Errorf("unsafe recursive removal target: %w", err)
 	}
@@ -535,7 +535,24 @@ func removeTree(root *os.Root, rel string, baseFD int) error {
 	if err != nil {
 		return err
 	}
+	if guard != nil {
+		if err := guard(filepath.Join(canonicalRoot, rel), info); err != nil {
+			return fmt.Errorf("recursive removal entry is protected: %w", err)
+		}
+	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		// A race may replace a checked entry with another inode. A mismatch
+		// must never silently authorize deletion of the replacement.
+		verified, err := root.Lstat(rel)
+		if err != nil {
+			return err
+		}
+		firstID, firstOK := info.Sys().(*syscall.Stat_t)
+		lastID, lastOK := verified.Sys().(*syscall.Stat_t)
+		if !firstOK || !lastOK || firstID.Dev != lastID.Dev ||
+			firstID.Ino != lastID.Ino || info.Mode().Type() != verified.Mode().Type() {
+			return fmt.Errorf("entry identity changed before recursive deletion: %s", rel)
+		}
 		return root.Remove(rel)
 	}
 	initial, ok := info.Sys().(*syscall.Stat_t)
@@ -584,7 +601,7 @@ func removeTree(root *os.Root, rel string, baseFD int) error {
 			}
 			for _, name := range names {
 				child := filepath.Join(rel, name)
-				if err := removeTree(root, child, baseFD); err != nil {
+				if err := removeTree(root, child, baseFD, canonicalRoot, guard); err != nil {
 					_ = dir.Close()
 					return fmt.Errorf("recursive removal may be partial at %s: %w", child, err)
 				}
@@ -625,6 +642,15 @@ func ensureRemoveDirectoryIdentity(root *os.Root, rel string, baseFD int, expect
 }
 
 func (m *Manager) Remove(target string, recursive bool) error {
+	return m.RemoveWithEntryGuard(target, recursive, nil)
+}
+
+// RemoveWithEntryGuard rechecks each actual entry during recursive deletion,
+// after the earlier whole-subtree preflight. Broker callers must supply the
+// current sensitive-file authorization check to catch entries introduced
+// between the preflight and mutation. A guard error may follow earlier
+// deletions; caller must preserve an unresolved operation journal.
+func (m *Manager) RemoveWithEntryGuard(target string, recursive bool, guard func(string, os.FileInfo) error) error {
 	rootPath, rel, err := selectRoot(m.writeRoots, target)
 	if err != nil {
 		return err
@@ -650,7 +676,7 @@ func (m *Manager) Remove(target string, recursive bool) error {
 			return err
 		}
 		defer base.Close()
-		return removeTree(root, rel, int(base.Fd()))
+		return removeTree(root, rel, int(base.Fd()), rootPath, guard)
 	}
 	return root.Remove(rel)
 }
