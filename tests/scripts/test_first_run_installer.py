@@ -176,5 +176,40 @@ esac
         )
 
 
+    def test_infinity_refuses_missing_explicit_ack_before_mutation(self):
+        proc = self.run_installer("--profile", "project", "--scope", "/opt",
+                                  "--infinity-opt", "--yes", "--run-as", "deploy")
+        self.assertEqual(proc.returncode, 4, proc.stdout + proc.stderr)
+        self.assertIn("--ack-infinity-opt", proc.stderr)
+        self.assert_no_scope_creation()
+
+    def test_infinity_refuses_non_opt_scope(self):
+        proc = self.run_installer("--profile", "project", "--scope", self.scope,
+                                  "--infinity-opt", "--yes", "--ack-infinity-opt",
+                                  "--run-as", "deploy", "--create-scope")
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("/opt", proc.stderr)
+        self.assert_no_scope_creation()
+
+    def test_infinity_refuses_preexisting_operator_secrets(self):
+        env_file = self.workdir / ".env"
+        env_file.write_text("DO_NOT_MODIFY=1\n")
+        proc = self.run_installer("--profile", "project", "--scope", "/opt",
+                                  "--infinity-opt", "--yes", "--ack-infinity-opt",
+                                  "--run-as", "deploy")
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertEqual(env_file.read_text(), "DO_NOT_MODIFY=1\n")
+        self.assertFalse(self.commands.exists())
+        self.assertNotIn("REACHED_INIT_ARGS", proc.stdout)
+
+    def test_infinity_explicit_ack_reaches_init_boundary_without_root_shell(self):
+        proc = self.run_installer("--profile", "project", "--scope", "/opt",
+                                  "--infinity-opt", "--yes", "--ack-infinity-opt",
+                                  "--run-as", "deploy")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("REACHED_INIT_ARGS", proc.stdout)
+        self.assertIn("Não libera shell root", proc.stdout)
+        self.assert_no_scope_creation()
+
 if __name__ == "__main__":
     unittest.main()
