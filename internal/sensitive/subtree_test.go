@@ -92,7 +92,7 @@ func TestVisitProtectedSubtreeVisitorFailureAndUnverifiablePathsFailClosed(t *te
 		}
 	}
 	missing := filepath.Join(root, "missing")
-	if err := VisitProtectedSubtree("", missing, func(string) error { return nil }); !os.IsNotExist(err) {
+	if err := VisitProtectedSubtree("", missing, func(string) error { return nil }); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing tree must fail closed, got: %v", err)
 	}
 	if err := VisitProtectedSubtree("", tree, nil); err == nil || !strings.Contains(err.Error(), "visitor") {
