@@ -111,9 +111,6 @@ services:
 
 networks:
   integrated-auth:
-  public-edge:
-    external: true
-    name: ${VPS_AGENT_EDGE_NETWORK:?set VPS_AGENT_EDGE_NETWORK}
 
 volumes:
   zitadel-postgres-data:
