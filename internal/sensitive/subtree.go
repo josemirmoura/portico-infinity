@@ -72,8 +72,15 @@ func VisitProtectedSubtree(hostRoot, target string, visit func(string) error) er
 					return statErr
 				}
 				if info.Mode()&os.ModeSymlink != 0 {
-					// Only its link is affected by recursive removal. The
-					// link target is never traversed.
+					// A link is unlinked without following its referent,
+					// but a link named .env is itself a protected name.
+					// Do not let recursive removal bypass exact-path
+					// sensitive work approval through a symlink leaf.
+					if ProtectedName(child) {
+						if err := visit(filepath.Join(target, child)); err != nil {
+							return err
+						}
+					}
 					continue
 				}
 				key, links, known := inode(info)
