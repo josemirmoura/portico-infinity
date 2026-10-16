@@ -2,7 +2,7 @@
 
 > **Atualização SRV-IA 16/10/2026:** conexão MCP e operações tipadas de arquivo dentro de `/opt` funcionaram; bloqueios fora do teto e de traversal confirmados. **`shell.exec` falhou antes da execução** (`sensitive-path scan exceeded safety limit`). E2E SRV-IA **parcial, ainda pendente**, sem comprovação de reboot/revogação. Evidências em [Relato SRV-IA](RELATO-SRV-IA-2026-10-16.md) e [Issue #4](https://github.com/josemirmoura/portico-infinity/issues/4).
 
-**Status:** E2E Docker real e OAuth real em laboratório descartável **aprovados**. Instalação pública/ChatGPT e E2E SRV-IA ainda pendentes.
+**Status (16/10/2026):** E2E Docker real e OAuth real em laboratório descartável **aprovados**. Correção SHELL-001 incorporada no commit `76dbeec0f8b1eae992617ab008726273b026eca5`, com regressões, CI e E2E de shell real **aprovados**. Implantação do Broker corrigido, reteste autenticado e homologação completa no SRV-IA **pendentes**; VPS Community permanece inalterada. [Procedimento do operador](UPGRADE-SHELL-001-SRV-IA.md).
 
 | Gate | Requisito | Estado |
 | --- | --- | --- |
