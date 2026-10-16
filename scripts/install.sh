@@ -330,14 +330,22 @@ if [ "$INFINITY_OPT" -eq 1 ]; then
       echo "INFINITY DENIED: production checkout must be /srv/portico-infinity" >&2
       exit 2
     fi
-    if [ "$owner_uid" -ne 0 ]; then
-      echo "INFINITY DENIED: controller checkout must be owned by root" >&2
+    if [ "$(id -u)" -ne 0 ] || [ "$owner_uid" -ne 0 ]; then
+      echo "INFINITY DENIED: run installer as root from a root-owned controller checkout" >&2
       exit 2
     fi
-    if [ "$(stat -c '%a' -- .)" = "777" ]; then
-      echo "INFINITY DENIED: world-writable controller checkout" >&2
+    controller_mode="$(stat -c '%a' -- .)"
+    if (( (8#$controller_mode & 0022) != 0 )); then
+      echo "INFINITY DENIED: controller checkout is writable by group/others" >&2
       exit 2
     fi
+    # A delegated AI shell must not also be a privileged host account.
+    shell_groups=" $(id -nG "$RUN_AS") "
+    case "$shell_groups" in
+      *' sudo '*|*' wheel '*|*' docker '*|*' lxd '*|*' libvirt '*)
+        echo "INFINITY DENIED: AI shell user belongs to an administrative host group" >&2
+        exit 2 ;;
+    esac
   fi
 fi
 
