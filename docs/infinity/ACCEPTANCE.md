@@ -1,5 +1,7 @@
 # Gates de aceite: Pórtico Infinity
 
+> **Atualização SRV-IA 16/10/2026:** conexão MCP e operações tipadas de arquivo dentro de `/opt` funcionaram; bloqueios fora do teto e de traversal confirmados. **`shell.exec` falhou antes da execução** (`sensitive-path scan exceeded safety limit`). E2E SRV-IA **parcial, ainda pendente**, sem comprovação de reboot/revogação. Evidências em [Relato SRV-IA](RELATO-SRV-IA-2026-10-16.md) e [Issue #4](https://github.com/josemirmoura/portico-infinity/issues/4).
+
 **Status:** E2E Docker real e OAuth real em laboratório descartável **aprovados**. Instalação pública/ChatGPT e E2E SRV-IA ainda pendentes.
 
 | Gate | Requisito | Estado |
