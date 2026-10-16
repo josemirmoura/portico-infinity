@@ -68,7 +68,8 @@ func (DockerCLI) StartComposeJob(ctx context.Context, dir, action, unit string) 
 		"--unit=" + unit, "--no-block", "--quiet",
 		"--description=Portico authorized Docker Compose task",
 		"--working-directory=" + dir,
-		"--property=Type=exec",
+		"--property=Type=oneshot",
+		"--property=RemainAfterExit=yes",
 		"--property=NoNewPrivileges=yes",
 		"--property=UMask=0077",
 		"--property=RuntimeMaxSec=7200",
@@ -96,6 +97,7 @@ func classifyComposeUnit(raw string) (string, string, *int, error) {
 		}
 	}
 	active := fields["ActiveState"]
+	substate := fields["SubState"]
 	result := fields["Result"]
 	load := fields["LoadState"]
 	if load != "loaded" {
@@ -110,7 +112,15 @@ func classifyComposeUnit(raw string) (string, string, *int, error) {
 		exit = &number
 	}
 	switch active {
-	case "active", "activating", "reloading", "deactivating":
+	case "active":
+		if substate == "exited" {
+			if result == "success" && exit != nil && *exit == 0 {
+				return "done", "", exit, nil
+			}
+			return "", "", nil, errors.New("exited Compose unit without trustworthy success status")
+		}
+		return "running", "", nil, nil
+	case "activating", "reloading", "deactivating":
 		return "running", "", nil, nil
 	case "failed":
 		return "failed", "systemd result: " + result, exit, nil
@@ -133,7 +143,7 @@ func (b *Broker) composeJobStatus(ctx context.Context, record state.JobRecord) (
 		return record, nil
 	}
 	out, err := hostexec.CommandContext(ctx, "systemctl", "show", record.UnitName,
-		"--no-pager", "--property=LoadState,ActiveState,Result,ExecMainStatus").CombinedOutput()
+		"--no-pager", "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus").CombinedOutput()
 	if err != nil {
 		return record, fmt.Errorf("cannot verify Compose unit: %s: %w", boundedOutput(out), err)
 	}
