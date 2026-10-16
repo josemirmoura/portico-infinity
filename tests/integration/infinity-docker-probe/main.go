@@ -81,7 +81,13 @@ func main() {
 			if callErr != nil {
 				r.Detail = callErr.Error()
 			} else if resp != nil {
-				r.Detail = fmt.Sprintf("unexpected IsError=%t", resp.IsError)
+				content, encodeErr := json.Marshal(resp.Content)
+				if encodeErr != nil {
+					r.Detail = fmt.Sprintf("unexpected IsError=%t (cannot encode details)", resp.IsError)
+				} else {
+					if len(content) > 1024 { content = content[:1024] }
+					r.Detail = fmt.Sprintf("unexpected IsError=%t content=%s", resp.IsError, content)
+				}
 			} else {
 				r.Detail = "missing MCP tool response"
 			}
