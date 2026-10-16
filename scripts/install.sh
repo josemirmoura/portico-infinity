@@ -16,6 +16,8 @@ CREATE_SCOPE=0
 LOCAL_ONLY=0
 ASSUME_YES=0
 ACK_WHOLE_HOST=0
+INFINITY_OPT=0
+ACK_INFINITY_OPT=0
 
 usage() {
   if vps_agent_is_pt_br; then
@@ -41,6 +43,8 @@ Opções:
   --local-only              Para após a verificação local.
   --yes                     Aceita a autoridade exibida sem prompt.
   --ack-whole-host          Obrigatório com --yes em whole-host.
+  --infinity-opt            Perfil experimental de arquivos privilegiados somente em /opt.
+  --ack-infinity-opt        Aprovação obrigatória em modo --yes com Infinity.
   -h, --help                Mostra esta ajuda.
 EOF
   else
@@ -66,6 +70,8 @@ Options:
   --local-only              Stop after local runtime verification.
   --yes                     Accept the displayed effective authority.
   --ack-whole-host          Required with --yes for whole-host.
+  --infinity-opt            Experimental privileged file operations only inside /opt.
+  --ack-infinity-opt        Required for non-interactive Infinity installation.
   -h, --help                Show this help.
 EOF
   fi
@@ -123,6 +129,8 @@ while [ "$#" -gt 0 ]; do
     --local-only) LOCAL_ONLY=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     --ack-whole-host) ACK_WHOLE_HOST=1; shift ;;
+    --infinity-opt) INFINITY_OPT=1; shift ;;
+    --ack-infinity-opt) ACK_INFINITY_OPT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "$(vps_agent_text "ERROR: unknown argument: $1" "ERRO: argumento desconhecido: $1")" >&2; usage >&2; exit 2 ;;
   esac
@@ -249,6 +257,41 @@ if [ "$PROFILE" = "whole-host" ] && [ "$ASSUME_YES" -eq 1 ] && [ "$ACK_WHOLE_HOS
   echo "$(vps_agent_text 'ERROR: non-interactive Whole Host requires --ack-whole-host.' 'ERRO: Whole Host não interativo requer --ack-whole-host.')" >&2
   exit 2
 fi
+# Fail closed before state changes, container start or directory creation.
+if [ "$INFINITY_OPT" -eq 1 ]; then
+  if [ "$PROFILE" != "project" ] || [ "$SCOPE" != "/opt" ] || [ "$ACK_WHOLE_HOST" -eq 1 ]; then
+    echo 'INFINITY DENIED: requires --profile project --scope /opt, not whole-host' >&2
+    exit 2
+  fi
+  if [ -e .env ] || [ -L .env ] || [ -e config/policy.yaml ] || [ -L config/policy.yaml ]; then
+    echo 'INFINITY DENIED: fresh install required; existing operator state is protected' >&2
+    exit 3
+  fi
+  printf '%s\n' \
+    '⚠️ PÓRTICO INFINITY: autorização PERSISTENTE em /opt, inclusive chmod/chown.' \
+    '⚠️ Não libera shell root, sudo apt, Docker irrestrito ou todo o host.' \
+    '⚠️ Arquivos em /opt executados por serviços privilegiados ainda oferecem risco indireto.'
+  if [ "$ASSUME_YES" -eq 1 ] && [ "$ACK_INFINITY_OPT" -ne 1 ]; then
+    echo 'INFINITY DENIED: --yes requires --ack-infinity-opt' >&2
+    exit 4
+  fi
+  if [ "$ASSUME_YES" -ne 1 ]; then
+    if [ ! -t 0 ]; then
+      echo 'INFINITY DENIED: interactive approval or --yes --ack-infinity-opt required' >&2
+      exit 4
+    fi
+    printf 'Digite/Type AUTORIZO INFINITY /opt para prosseguir: '
+    read -r infinity_answer
+    if [ "$infinity_answer" != 'AUTORIZO INFINITY /opt' ]; then
+      echo 'Infinity cancelado / cancelled' >&2
+      exit 4
+    fi
+  fi
+elif [ "$ACK_INFINITY_OPT" -eq 1 ]; then
+  echo 'INFINITY DENIED: --ack-infinity-opt requires --infinity-opt' >&2
+  exit 2
+fi
+
 if [ "$PROFILE" != "whole-host" ] && [ "$SCOPE" = "/" ]; then
   echo "$(vps_agent_text 'ERROR: / is reserved for explicit Whole Host mode.' 'ERRO: / exige seleção explícita do perfil Whole Host.')" >&2
   exit 2
@@ -337,6 +380,10 @@ if not seen:
 path.write_text("\n".join(out)+"\n")
 PY
 chmod 600 .env
+
+if [ "$INFINITY_OPT" -eq 1 ]; then
+  python3 scripts/configure-infinity-opt.py --policy config/policy.yaml --env .env
+fi
 
 if [ "$PROFILE" = "custom" ]; then
   echo
