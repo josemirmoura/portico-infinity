@@ -317,6 +317,20 @@ if [ -z "$RUN_AS" ] || ! id -u "$RUN_AS" >/dev/null 2>&1 || [ "$(id -u "$RUN_AS"
   exit 2
 fi
 
+if [ "$INFINITY_OPT" -eq 1 ]; then
+  # Do not let the ordinary (non-root) shell account own the Gateway checkout.
+  owner_uid="$(stat -c '%u' -- .)"
+  shell_uid="$(id -u "$RUN_AS")"
+  if [ "$owner_uid" = "$shell_uid" ]; then
+    echo "INFINITY DENIED: dedicated --run-as account must differ from checkout owner" >&2
+    exit 2
+  fi
+  if [ "$LOCAL_ONLY" -ne 1 ] && [ "$(pwd -P)" != "/opt/portico-infinity" ]; then
+    echo "INFINITY DENIED: production checkout must be /opt/portico-infinity" >&2
+    exit 2
+  fi
+fi
+
 create_scope_directory() {
   local owner_group
   owner_group="$(id -gn "$RUN_AS")" || return 1
