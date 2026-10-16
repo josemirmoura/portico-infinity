@@ -17,7 +17,7 @@ O código do controlador permanece fora de `/opt`, inclusive nos testes. Não in
 
 ## Resultado experimental já executado
 
-O E2E local Docker concluído com sucesso está documentado em [Critérios de aceite](ACCEPTANCE.md#evidência-e2e-docker-real-16102026). O workflow reproduz contêineres reais e usa autenticação estática de laboratório. **Ele não substitui a instalação pública/OAuth nem a validação no SRV-IA.**
+Os E2E **Docker local e OAuth real em laboratório** concluídos com sucesso estão documentados em [Critérios de aceite](ACCEPTANCE.md). O workflow reproduz contêineres reais e usa autenticação estática de laboratório. **Ele não substitui a instalação pública/OAuth nem a validação no SRV-IA.**
 
 ## Gate 0: verificar a máquina descartável
 

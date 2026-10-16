@@ -1,14 +1,14 @@
 # Gates de aceite: Pórtico Infinity
 
-**Status:** especificação, não executados para o perfil `opt-privileged`.
+**Status:** E2E Docker real e OAuth real em laboratório descartável **aprovados**. Instalação pública/ChatGPT e E2E SRV-IA ainda pendentes.
 
 | Gate | Requisito | Estado |
 | --- | --- | --- |
 | I0 | Histórico da `main` e Apache-2.0 preservados no repositório independente | concluído |
 | I1 | Identidade e documentação distintas, sem alterar Community/Cloud | parcialmente concluído |
-| I2 | Instalador opt-in e política persistente `/opt` auditável | preview existente, E2E pendente |
+| I2 | Instalador opt-in e política persistente `/opt` auditável | E2E Docker local aprovado; fluxo público do instalador pendente |
 | I3 | Broker: operações de arquivo privilegiadas **tipadas**, confinadas a `/opt`; shell não-root | **E2E Docker local aprovado**; shell root bloqueado; E2E SRV-IA pendente |
-| I4 | OAuth/identidade MCP, túnel e revogação externa | pendente |
+| I4 | OAuth/identidade MCP, túnel e revogação externa | **OAuth real em laboratório aprovado**; túnel público e revogação externa pendentes |
 | I5 | Adversarial: traversal, symlinks, hardlinks, montagens, segredos, `/proc`, TOCTOU e subject mismatch | pendente |
 | I6 | `shell.exec_admin`, Docker host/root e gestão global negados por padrão | **bloqueios testados no Docker local**; ameaças indiretas pendentes |
 | I7 | Reboot/reconexão mantêm autorização; revogação e restauração funcionam | pendente |
@@ -28,6 +28,16 @@
 - Cleanup final do projeto Docker executado em runner descartável. **Nem VPS nem SRV-IA foram alterados.**
 
 **Não coberto:** instalação guiada pública, OAuth/Zitadel e conexão ChatGPT real, reinicialização completa do host, revogação de tokens fora da máquina, efeitos indiretos de scripts em `/opt`, e instalação/desinstalação homologadas no SRV-IA. Esses gates permanecem pendentes e não devem ser descritos como aprovados.
+
+## Evidência OAuth real, 16/10/2026
+
+**APROVADO somente em laboratório descartável.** Workflow [infinity-real-oauth-disposable-acceptance #38893160988](https://github.com/josemirmoura/portico-infinity/actions/runs/38893160988), commit `c0513c155450188193ab5b1516817f9516fb2dfe`: **SUCCESS**.
+
+- ZITADEL/PostgreSQL/Login V2 e Dynamic Client Registration reais, com token OAuth real, CA de laboratório e validação TLS.
+- Traefik HTTPS → Gateway MCP → Broker via socket Unix → política `scoped` com teto `/opt`, leitura/escrita e auditoria válidas.
+- Negados token inválido, operações em `/srv/portico-infinity`, fuga para `/etc`, instalação de pacotes e shell administrativo.
+- Identidade Docker do ensaio: `portico-infinity-oauth`, isolada do Community. Na produtização, `compose.infinity-auth.yaml` substitui os nomes dos roteadores/serviços Traefik; `setup-integrated-auth.sh` seleciona volumes Infinity e recusa proxy público automático sem Traefik reaproveitável.
+- Não foi realizado login interativo no ChatGPT nem exposto endereço público de produção. OAuth/ChatGPT do SRV-IA e revogação de sessões continuam pendentes. Teste de integração OAuth não é teste de renovação/revogação.
 
 ## Provas mínimas
 

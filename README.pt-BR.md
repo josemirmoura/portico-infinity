@@ -24,6 +24,10 @@ A autenticação HTTPS/OAuth continua obrigatória. A autorização não implica
 
 O diretório de instalação fica propositalmente fora da área delegada. Esse isolamento ainda exige testes E2E e revisão de permissões efetivas, incluindo contas de serviço.
 
+## Avanço da integração OAuth
+
+O E2E com **ZITADEL e token OAuth reais em ambiente descartável** foi aprovado ([GitHub Actions](https://github.com/josemirmoura/portico-infinity/actions/runs/38893160988)). O gateway e o Broker respeitaram o escopo `/opt` e negaram operações globais. Para instalações Infinity, usar o overlay `compose.infinity-auth.yaml` com rótulos e volumes próprios. A conexão pública da conta ChatGPT com o SRV-IA continua pendente.
+
 ## Estado da implementação
 
 - ✅ Repositório público independente e histórico `main` do Community importado.
