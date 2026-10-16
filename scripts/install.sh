@@ -18,6 +18,8 @@ ASSUME_YES=0
 ACK_WHOLE_HOST=0
 INFINITY_OPT=0
 ACK_INFINITY_OPT=0
+REMOTE_EDGE=0
+WG_BIND_ADDRESS=""
 
 usage() {
   if vps_agent_is_pt_br; then
@@ -45,6 +47,8 @@ Opções:
   --ack-whole-host          Obrigatório com --yes em whole-host.
   --infinity-opt            Perfil experimental de arquivos privilegiados somente em /opt.
   --ack-infinity-opt        Aprovação obrigatória em modo --yes com Infinity.
+  --remote-edge             Proxy HTTPS fica na VPS, ligado ao SRV-IA por WireGuard.
+  --wg-bind-address IPv4    IPv4 da interface WireGuard local no SRV-IA.
   -h, --help                Mostra esta ajuda.
 EOF
   else
@@ -72,6 +76,8 @@ Options:
   --ack-whole-host          Required with --yes for whole-host.
   --infinity-opt            Experimental privileged file operations only inside /opt.
   --ack-infinity-opt        Required for non-interactive Infinity installation.
+  --remote-edge             HTTPS edge proxy on separate VPS over WireGuard.
+  --wg-bind-address IPv4    Local WireGuard interface IPv4 on SRV-IA.
   -h, --help                Show this help.
 EOF
   fi
@@ -131,6 +137,10 @@ while [ "$#" -gt 0 ]; do
     --ack-whole-host) ACK_WHOLE_HOST=1; shift ;;
     --infinity-opt) INFINITY_OPT=1; shift ;;
     --ack-infinity-opt) ACK_INFINITY_OPT=1; shift ;;
+    --remote-edge) REMOTE_EDGE=1; shift ;;
+    --wg-bind-address)
+      [ "$#" -ge 2 ] || { echo "INFINITY REMOTE DENIED: --wg-bind-address requires IPv4" >&2; exit 2; }
+      WG_BIND_ADDRESS="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "$(vps_agent_text "ERROR: unknown argument: $1" "ERRO: argumento desconhecido: $1")" >&2; usage >&2; exit 2 ;;
   esac
@@ -257,6 +267,28 @@ if [ "$PROFILE" = "whole-host" ] && [ "$ASSUME_YES" -eq 1 ] && [ "$ACK_WHOLE_HOS
   echo "$(vps_agent_text 'ERROR: non-interactive Whole Host requires --ack-whole-host.' 'ERRO: Whole Host não interativo requer --ack-whole-host.')" >&2
   exit 2
 fi
+# Explicit remote mode does not affect normal Community-compatible flows.
+# Verify a live local WireGuard address before any stateful init or container
+# creation. A missing tunnel cannot silently fall back to Wi-Fi/0.0.0.0.
+if [ "$REMOTE_EDGE" -eq 1 ] || [ -n "$WG_BIND_ADDRESS" ]; then
+  if [ "$REMOTE_EDGE" -ne 1 ] || [ "$INFINITY_OPT" -ne 1 ] || [ -z "$WG_BIND_ADDRESS" ] || [ -z "$DOMAIN" ]; then
+    echo 'INFINITY REMOTE DENIED: requires --infinity-opt --remote-edge --wg-bind-address IPv4 --domain HOST' >&2
+    exit 2
+  fi
+  python3 - "$WG_BIND_ADDRESS" <<'PY'
+import ipaddress,sys
+try:
+    ip=ipaddress.IPv4Address(sys.argv[1])
+    assert ip.is_private and not ip.is_loopback and not ip.is_link_local
+except (ValueError, AssertionError):
+    raise SystemExit("INFINITY REMOTE DENIED: a private WireGuard IPv4 is required")
+PY
+  if ! command -v ip >/dev/null 2>&1 || ! ip -o -4 address show dev wg-infinity 2>/dev/null | grep -Fq " inet $WG_BIND_ADDRESS/"; then
+    echo 'INFINITY REMOTE DENIED: requested IP is not assigned to live wg-infinity interface' >&2
+    exit 2
+  fi
+fi
+
 # Fail closed before state changes, container start or directory creation.
 if [ "$INFINITY_OPT" -eq 1 ]; then
   if [ "$PROFILE" != "project" ] || [ "$SCOPE" != "/opt" ] || [ "$ACK_WHOLE_HOST" -eq 1 ]; then
@@ -417,7 +449,7 @@ chmod 600 .env
 if [ "$INFINITY_OPT" -eq 1 ]; then
   python3 scripts/configure-infinity-opt.py --policy config/policy.yaml --env .env
   # Static instance naming and a protected controller checkout. Fresh installs only.
-  python3 - .env <<'PY'
+  python3 - .env "$REMOTE_EDGE" "$WG_BIND_ADDRESS" <<'PY'
 from pathlib import Path
 import sys
 path=Path(sys.argv[1])
@@ -429,6 +461,9 @@ values={
     "VPS_AGENT_GATEWAY_IMAGE": "portico-infinity-gateway:local",
     "VPS_AGENT_BROKER_IMAGE": "portico-infinity-broker:local",
 }
+if sys.argv[2]=="1":
+    values["INFINITY_REMOTE_EDGE"]="1"
+    values["INFINITY_WG_BIND_ADDRESS"]=sys.argv[3]
 lines=path.read_text().splitlines()
 found=set()
 out=[]
@@ -494,6 +529,9 @@ fi
 
 vps_agent_step "$(vps_agent_text '4/7 Containers' '4/7 Contêineres')"
 compose=(docker compose -f compose.yaml)
+if [ "$REMOTE_EDGE" -eq 1 ]; then
+  compose+=(-f compose.infinity-wg-gateway.yaml)
+fi
 if [ "$PROFILE" = "whole-host" ]; then
   compose+=(-f compose.host.yaml)
 fi
@@ -514,6 +552,7 @@ fi
 
 vps_agent_step "$(vps_agent_text '6/7 Secure public access' '6/7 Acesso público seguro')"
 auth_args=()
+[ "$REMOTE_EDGE" -eq 1 ] && auth_args+=(--remote-edge)
 [ -n "$DOMAIN" ] && auth_args+=(--domain "$DOMAIN")
 [ -n "$OPERATOR_EMAIL" ] && auth_args+=(--operator-email "$OPERATOR_EMAIL")
 [ -n "$OPERATOR_USERNAME" ] && auth_args+=(--operator-username "$OPERATOR_USERNAME")
