@@ -485,7 +485,7 @@ fi
 # Infinity local-only is a non-deploying policy preview, not the inherited
 # Community local runtime installation. Never start a privileged Broker when
 # the protected /srv ownership contract has not been verified.
-if [ "$INFINITY_OPT" -eq 1 ] && [ "$LOCAL_ONLY" -eq 1 ]; then
+if [ "${INFINITY_OPT:-0}" -eq 1 ] && [ "${LOCAL_ONLY:-0}" -eq 1 ]; then
   echo
   echo "$(vps_agent_text 'INFINITY LOCAL PREVIEW COMPLETE' 'PRÉ-VISUALIZAÇÃO LOCAL INFINITY CONCLUÍDA')"
   echo "$(vps_agent_text 'No containers were started. Public OAuth and ChatGPT E2E remain pending.' 'Nenhum contêiner foi iniciado. OAuth público e E2E com ChatGPT permanecem pendentes.')"
