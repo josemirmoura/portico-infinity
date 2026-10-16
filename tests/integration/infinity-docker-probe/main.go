@@ -110,6 +110,27 @@ func main() {
 	}
 	results = append(results, result{Case: "shell.exec real non-root workspace proof", Passed: shellPassed})
 	fail = fail || !shellPassed
+	// The .env fixture is intentionally Unix-readable; a successful DENIED
+	// result therefore proves the systemd mask rather than mode bits alone.
+	secretResult := filepath.Join(*directory, "secret-access.txt")
+	add("shell.exec", true, map[string]any{
+		"command": "if cat .env >/dev/null 2>&1; then printf LEAKED > secret-access.txt; else printf DENIED > secret-access.txt; fi",
+		"cwd": *directory, "runtime_seconds": 20,
+	})
+	secretDenied := false
+	for attempt := 0; attempt < 40; attempt++ {
+		if data, readErr := os.ReadFile(secretResult); readErr == nil {
+			secretDenied = string(data) == "DENIED"
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	results = append(results, result{Case: "shell.exec blocks Unix-readable .env", Passed: secretDenied})
+	fail = fail || !secretDenied
 	add("shell.exec", false, map[string]any{
 		"command": "id -u", "cwd": "/opt", "runtime_seconds": 20,
 	})
