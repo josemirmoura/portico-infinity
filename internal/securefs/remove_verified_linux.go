@@ -114,11 +114,11 @@ func verifiedRemoveEntry(parentFD int, name, canonical string, check func(string
 		}
 		childStat, err := verifiedStatx(childFD, "", unix.AT_EMPTY_PATH)
 		if err != nil {
-			unix.Close(childFD)
+			_ = unix.Close(childFD) // cleanup after prior failure
 			return err
 		}
 		if !sameVerifiedEntry(info, childStat) {
-			unix.Close(childFD)
+			_ = unix.Close(childFD) // cleanup after prior failure
 			return fmt.Errorf("directory inode changed before recursive removal: %s", canonical)
 		}
 		child := os.NewFile(uintptr(childFD), canonical)
@@ -126,7 +126,7 @@ func verifiedRemoveEntry(parentFD int, name, canonical string, check func(string
 		for {
 			entries, readErr := child.ReadDir(256)
 			if readErr != nil && readErr != io.EOF {
-				child.Close()
+				_ = child.Close() // cleanup after prior failure
 				return readErr
 			}
 			for _, entry := range entries {
