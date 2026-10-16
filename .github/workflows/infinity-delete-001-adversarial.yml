@@ -1,0 +1,46 @@
+name: infinity-delete-001-adversarial
+
+on:
+  pull_request:
+    paths:
+      - 'internal/sensitive/**'
+      - 'internal/securefs/**'
+      - 'internal/broker/**'
+      - '.github/workflows/infinity-delete-001-adversarial.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  destructive-lab:
+    name: Large synthetic trees and privileged bind-mount denial
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Real deletion and scan on 50k+ synthetic entries
+        run: |
+          set -euo pipefail
+          go test -count=1 -timeout=10m -v ./internal/securefs ./internal/sensitive \
+            -run '^(TestRecursiveRemoveMoreThanFiftyThousandEntries|TestSubtreeScanHandlesMoreThanFiftyThousandEntries)$'
+      - name: Build static adversarial test binary
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/portico-delete-test" ./internal/securefs
+      - name: Inject bind mount after preflight inside disposable privileged container
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --privileged --read-only \
+            --tmpfs /tmp:rw,mode=1777 \
+            --mount "type=bind,source=$RUNNER_TEMP/portico-delete-test,target=/test,readonly" \
+            -e PORTICO_REQUIRE_MOUNT_TEST=1 \
+            ubuntu:24.04 /test \
+            -test.v -test.run '^TestRecursiveRemoveRejectsBindMountInsertedAfterPreflight$'
+      - name: Ensure tests did not modify checkout
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
