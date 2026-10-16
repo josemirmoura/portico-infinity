@@ -32,3 +32,15 @@ An **experimental** opt-in wrapper, `scripts/install-infinity-preview.sh`, confi
 ## License and origin
 
 Derived from [Pórtico MCP Community](https://github.com/josemirmoura/mcp-vps-agent-gateway), by Josemir Moura, under Apache-2.0. Source LICENSE and attribution remain preserved. Git history is retained in `main`. Public repo access is not permission to access an operator's machine: the operator must authenticate and consent locally.
+
+## Inherited Community installation contract (not yet Infinity certification)
+
+The inherited setup must present HTTPS/OAuth, connect a compatible **ChatGPT Web** MCP client, obtain a real authenticated `system.info` call, and verify the matching Broker audit record **before** displaying `INSTALLATION COMPLETE`. Portico Infinity adds further root-specific gates; this legacy contract alone does not approve Infinity installation.
+
+Localized inherited documentation (PT-BR):
+
+- [Quick Start / Início rápido](docs/quick-start.pt-BR.md)
+- [First installation acceptance / Aceite de primeira instalação](docs/first-install-acceptance.pt-BR.md)
+- [Installer flow / Fluxo do instalador](docs/installer-flow.pt-BR.md)
+- [Installation contract / Contrato de instalação](docs/installation-contract.pt-BR.md)
+- [ChatGPT integration / Integração com ChatGPT](docs/chatgpt-integration.pt-BR.md)

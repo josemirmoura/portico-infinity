@@ -37,3 +37,15 @@ O instalador histórico `scripts/install.sh` ainda corresponde ao comportamento 
 ## Autoria e licença
 
 Projeto de Josemir Moura, derivado do [Pórtico MCP Community](https://github.com/josemirmoura/mcp-vps-agent-gateway), sob a licença **Apache-2.0**. Manter créditos, LICENSE e NOTICE aplicáveis. O Community e seu plano de testes E2E não são alterados por este desenvolvimento.
+
+## Contrato herdado de instalação (ainda sem homologação Infinity)
+
+O instalador herdado precisa validar HTTPS/OAuth, conectar o cliente MCP **ChatGPT Web**, executar uma chamada real autenticada `system.info` e conferir a auditoria do Broker **antes** de emitir `INSTALLATION COMPLETE`. O Infinity exigirá ainda os testes específicos do root persistente. O contrato do Community, isoladamente, não homologou a nova edição.
+
+Documentação herdada em português:
+
+- [Quick Start / Início rápido](docs/quick-start.pt-BR.md)
+- [First installation acceptance / Aceite de primeira instalação](docs/first-install-acceptance.pt-BR.md)
+- [Installer flow / Fluxo do instalador](docs/installer-flow.pt-BR.md)
+- [Installation contract / Contrato de instalação](docs/installation-contract.pt-BR.md)
+- [ChatGPT integration / Integração com ChatGPT](docs/chatgpt-integration.pt-BR.md)
