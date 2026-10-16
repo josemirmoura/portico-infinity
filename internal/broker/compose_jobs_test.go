@@ -133,6 +133,11 @@ func TestComposeAsyncJobIsDurableIdempotentAndScoped(t *testing.T) {
 	if resp.OK || resp.Error == nil || resp.Error.Code != "resource_busy" || starter.starts != 1 {
 		t.Fatalf("concurrent Compose action not blocked: %+v starts=%d", resp, starter.starts)
 	}
+	// A busy rejection occurs BEFORE any effect was dispatched. It must
+	// release the operation intent for safe retry with the original ID.
+	if err := store.AbortOperation(context.Background(), "another-operation"); err == nil {
+		t.Fatal("busy pre-dispatch left an orphan pending operation")
+	}
 
 	// No other subject can read this job even if it guesses the job ID.
 	foreign := b.Handle(context.Background(), wire.Request{
@@ -168,6 +173,9 @@ func TestComposeAsyncDispatchFailureNeverRetriesBlindly(t *testing.T) {
 	resp = b.composeMutationAsync(context.Background(), req, "up", starter)
 	if resp.OK || resp.Error == nil || resp.Error.Code != "resource_busy" || starter.starts != 1 {
 		t.Fatalf("new operation bypassed uncertain dispatch: %+v", resp)
+	}
+	if err := store.AbortOperation(context.Background(), "other"); err == nil {
+		t.Fatal("busy pre-dispatch left an orphan pending operation")
 	}
 }
 
