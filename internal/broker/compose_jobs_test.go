@@ -35,6 +35,8 @@ func TestComposeJobStatusClassification(t *testing.T) {
 		fail bool
 	}{
 		{"running", "LoadState=loaded\nActiveState=active\nResult=success\nExecMainStatus=0", "running", 0, false},
+		{"oneshot-done", "LoadState=loaded\nActiveState=active\nSubState=exited\nResult=success\nExecMainStatus=0", "done", 0, false},
+		{"oneshot-uncertain", "LoadState=loaded\nActiveState=active\nSubState=exited\nResult=success\nExecMainStatus=", "", 0, true},
 		{"done", "LoadState=loaded\nActiveState=inactive\nResult=success\nExecMainStatus=0", "done", 0, false},
 		{"failed", "LoadState=loaded\nActiveState=failed\nResult=exit-code\nExecMainStatus=28", "failed", 28, false},
 		{"timeout", "LoadState=loaded\nActiveState=inactive\nResult=timeout\nExecMainStatus=1", "failed", 1, false},
