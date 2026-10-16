@@ -57,6 +57,11 @@ if [[ ! -d "$directory" || "$(stat -c '%u' -- "$directory")" != 0 ]]; then
   echo "ERRO: /etc/wireguard não é um diretório de root." >&2
   exit 2
 fi
+dir_mode="$(stat -c '%a' -- "$directory")"
+if (( (8#$dir_mode & 0022) != 0 )); then
+  echo "ERRO: /etc/wireguard permite escrita por grupo/outros; revisar permissões." >&2
+  exit 2
+fi
 if [[ -e "$private" || -L "$private" || -e "$public" || -L "$public" ]]; then
   echo "ERRO: identidade já existe, chaves NÃO serão substituídas." >&2
   echo "Para conferir somente a chave pública: sudo cat $public" >&2
