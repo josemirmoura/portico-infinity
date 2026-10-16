@@ -15,7 +15,7 @@ O Gateway usa timeout IPC de 15 s. Antes desta mudança, `compose.pull/up/down` 
 - `job.status` verifica `systemctl show` e interpreta `ActiveState/Result/ExecMainStatus` sem confundir unidade ausente com sucesso. `job.tail` usa o runner existente e mantém limites de saída. `job.cancel` usa o mesmo escopo por proprietário, conforme a API existente.
 - Um `operation_id` estável gera identificador de job determinístico (hash do sujeito e ID da operação). Retry com o mesmo ID retorna o resultado cacheado, ou identifica o job anterior sem reiniciá-lo se houve falha no retorno.
 - Um segundo `compose.*` para o mesmo diretório é negado enquanto houver job ativo ou status incerto. Até as unidades que falharam na confirmação ficam pendentes para reconciliação manual.
-- Jobs têm limite de execução de **2 horas**, memória da unidade limitada e não usam `--collect`, preservando o código de saída para consulta posterior mesmo após reconexão ou reinício do Broker.
+- Jobs têm limite de execução de **2 horas**, memória da unidade limitada e usam `systemd-run` com `Type=oneshot` e `RemainAfterExit=yes` (sem `--collect`), preservando uma unidade concluída em `active/exited` e o código de saída para consulta posterior mesmo após reconexão ou reinício do Broker. Sem esta retenção, a unidade curta pode desaparecer (`LoadState=not-found`) antes do primeiro `job.status`.
 - Com `DockerManager` falso de testes, caminho antigo síncrono continua possível. Em produção, `DockerCLI` implementa o iniciador assíncrono.
 
 ## Testes adicionados
@@ -44,3 +44,7 @@ O Gateway usa timeout IPC de 15 s. Antes desta mudança, `compose.pull/up/down` 
 - Existe janela entre persistência SQLite e despacho systemd. Quando a existência da unidade é incerta, o projeto fica bloqueado para reconciliação manual. É intencional e evita duplicar efeitos.
 - O Compose autorizado é potencialmente privilegiado em sua própria capacidade (montagens e root no contêiner). Manter aprovação humana prévia para o projeto, arquivos de configuração restritos, validação de symlinks e auditoria.
 - Esta correção resolve somente operações Compose. Transferências de modelos LLM multigigabyte e exclusão recursiva >50.000 entradas continuam nas issues #8 e #6.
+
+## Falha descoberta em CI real e regressão
+
+O [Docker package acceptance](https://github.com/josemirmoura/portico-infinity/actions/runs/38978432836) recebeu rapidamente `job_id` para `compose.up`, mas o `job.status` seguinte encontrou a unidade descarregada com `LoadState=not-found`. Foi corrigido na branch para execução systemd `Type=oneshot`/`RemainAfterExit=yes`, com classificação `active/exited`, código de saída zero e `Result=success` como concluído. Adicionados testes de status confiável e estado incerto. **A versão corrigida aguarda novo CI real antes de qualquer merge.**
