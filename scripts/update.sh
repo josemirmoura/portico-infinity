@@ -6,6 +6,15 @@ cd "$(dirname "$0")/.."
 source scripts/lib/product.sh
 vps_agent_init_language ""
 
+# Infinity has an isolated Docker project and must NEVER use this
+# Community-only lifecycle implementation. Fail closed before Docker,
+# credential rotation, backup, git fetch or any destructive operation.
+if [ "$(pwd -P)" = "/srv/portico-infinity" ] || { [ -f .env ] && grep -Fxq 'COMPOSE_PROJECT_NAME=portico-infinity' .env; }; then
+  echo "INFINITY LIFECYCLE DENIED: Community updater/remover cannot manage Infinity. Use scripts/infinity-emergency-stop.py for an owner-only emergency stop." >&2
+  exit 2
+fi
+
+
 # Serialize lifecycle changes for this installation. Without this lock, two
 # updater processes can stop, snapshot, reset Git and restore the same state
 # concurrently. Lock the backups DIRECTORY inode: no symlinkable lockfile and

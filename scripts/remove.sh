@@ -64,6 +64,15 @@ fi
 
 repo_root="$PWD"
 
+# Infinity has an isolated Docker project and must NEVER use this
+# Community-only lifecycle implementation. Fail closed before Docker,
+# credential rotation, backup, git fetch or any destructive operation.
+if [ "$(pwd -P)" = "/srv/portico-infinity" ] || { [ -f .env ] && grep -Fxq 'COMPOSE_PROJECT_NAME=portico-infinity' .env; }; then
+  echo "INFINITY LIFECYCLE DENIED: Community updater/remover cannot manage Infinity. Use scripts/infinity-emergency-stop.py for an owner-only emergency stop." >&2
+  exit 2
+fi
+
+
 # BEGIN REMOVE PROJECT OWNERSHIP GUARD
 # The bundled removal script acts on a fixed Docker project and identity volumes.
 # A copied checkout MUST NOT stop or delete another installation's resources.
