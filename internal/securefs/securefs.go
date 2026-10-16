@@ -527,7 +527,10 @@ func (m *Manager) Move(src, dst string) error {
 // This operation is NOT atomic. If an external process changes the tree during
 // deletion, it may fail after some items have been removed. The caller must
 // report an uncertain/partial outcome rather than claim rollback.
-func removeTree(root *os.Root, rel string) error {
+func removeTree(root *os.Root, rel string, baseFD int) error {
+	if err := ensureNoMountCross(baseFD, rel); err != nil {
+		return fmt.Errorf("unsafe recursive removal target: %w", err)
+	}
 	info, err := root.Lstat(rel)
 	if err != nil {
 		return err
@@ -539,15 +542,13 @@ func removeTree(root *os.Root, rel string) error {
 	if !ok {
 		return errors.New("cannot verify directory inode before recursive removal")
 	}
+	// Directory cursors may skip entries if those entries are removed while
+	// enumerating. Sweep a directory with bounded 256-name batches and repeat
+	// only if entries remain. Unlike reopening per batch, this avoids quadratic
+	// scans when deleting model/dataset directories with >50,000 files.
 	for {
-		now, err := root.Lstat(rel)
-		if err != nil {
+		if err := ensureRemoveDirectoryIdentity(root, rel, baseFD, initial); err != nil {
 			return err
-		}
-		current, ok := now.Sys().(*syscall.Stat_t)
-		if !ok || !now.IsDir() || now.Mode()&os.ModeSymlink != 0 ||
-			current.Dev != initial.Dev || current.Ino != initial.Ino {
-			return fmt.Errorf("directory identity changed during recursive removal: %s", rel)
 		}
 		dir, err := root.Open(rel)
 		if err != nil {
@@ -563,32 +564,64 @@ func removeTree(root *os.Root, rel string) error {
 			_ = dir.Close()
 			return fmt.Errorf("directory identity changed while opening: %s", rel)
 		}
-		names, readErr := dir.Readdirnames(256)
-		closeErr := dir.Close()
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return readErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if len(names) == 0 {
-			// Empty at this instant. Recheck identity, then request removal.
-			final, err := root.Lstat(rel)
-			if err != nil {
+		removed := 0
+		for {
+			names, readErr := dir.Readdirnames(256)
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				_ = dir.Close()
+				return readErr
+			}
+			if len(names) == 0 {
+				if !errors.Is(readErr, io.EOF) {
+					_ = dir.Close()
+					return fmt.Errorf("directory enumeration made no progress: %s", rel)
+				}
+				break
+			}
+			if err := ensureRemoveDirectoryIdentity(root, rel, baseFD, initial); err != nil {
+				_ = dir.Close()
 				return err
 			}
-			finalID, ok := final.Sys().(*syscall.Stat_t)
-			if !ok || !final.IsDir() || finalID.Dev != initial.Dev || finalID.Ino != initial.Ino {
-				return fmt.Errorf("directory identity changed before removal: %s", rel)
+			for _, name := range names {
+				child := filepath.Join(rel, name)
+				if err := removeTree(root, child, baseFD); err != nil {
+					_ = dir.Close()
+					return fmt.Errorf("recursive removal may be partial at %s: %w", child, err)
+				}
+				removed++
 			}
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+		}
+		if err := dir.Close(); err != nil {
+			return err
+		}
+		if removed == 0 {
+			if err := ensureRemoveDirectoryIdentity(root, rel, baseFD, initial); err != nil {
+				return err
+			}
+			// ENOTEMPTY means a concurrent writer inserted a new entry. Fail
+			// explicitly and leave the operation journal unreconciled.
 			return root.Remove(rel)
 		}
-		for _, name := range names {
-			if err := removeTree(root, filepath.Join(rel, name)); err != nil {
-				return fmt.Errorf("recursive removal partially completed at %s: %w", filepath.Join(rel, name), err)
-			}
-		}
 	}
+}
+
+func ensureRemoveDirectoryIdentity(root *os.Root, rel string, baseFD int, expected *syscall.Stat_t) error {
+	if err := ensureNoMountCross(baseFD, rel); err != nil {
+		return fmt.Errorf("mount boundary changed during removal of %s: %w", rel, err)
+	}
+	now, err := root.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	actual, ok := now.Sys().(*syscall.Stat_t)
+	if !ok || !now.IsDir() || now.Mode()&os.ModeSymlink != 0 ||
+		actual.Dev != expected.Dev || actual.Ino != expected.Ino {
+		return fmt.Errorf("directory identity changed during recursive removal: %s", rel)
+	}
+	return nil
 }
 
 func (m *Manager) Remove(target string, recursive bool) error {
@@ -612,7 +645,12 @@ func (m *Manager) Remove(target string, recursive bool) error {
 		return root.Remove(rel)
 	}
 	if recursive {
-		return removeTree(root, rel)
+		base, err := root.Open(".")
+		if err != nil {
+			return err
+		}
+		defer base.Close()
+		return removeTree(root, rel, int(base.Fd()))
 	}
 	return root.Remove(rel)
 }
