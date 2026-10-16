@@ -13,6 +13,7 @@ import (
 )
 
 func TestDelete001RecursiveRemovalOfLargeAuthorizedTree(t *testing.T) {
+	t.Setenv("VPS_AGENT_INFINITY_PROTECTED_ROOT", "/srv/portico-infinity")
 	b, root, store := sensitiveTestBroker(t)
 	defer store.Close()
 	b.Policy.Filesystem.Actions = append(b.Policy.Filesystem.Actions, "remove_recursive")
@@ -44,6 +45,7 @@ func TestDelete001RecursiveRemovalOfLargeAuthorizedTree(t *testing.T) {
 }
 
 func TestDelete001DenyNestedSecretsBeforeAnyDeletion(t *testing.T) {
+	t.Setenv("VPS_AGENT_INFINITY_PROTECTED_ROOT", "/srv/portico-infinity")
 	b, root, store := sensitiveTestBroker(t)
 	defer store.Close()
 	b.Policy.Filesystem.Actions = append(b.Policy.Filesystem.Actions, "remove_recursive")
