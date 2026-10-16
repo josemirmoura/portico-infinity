@@ -31,13 +31,13 @@ The protected control-plane checkout lives in **`/srv/portico-infinity`**, owned
 
 ## Disposable real OAuth evidence
 
-The independent Infinity OAuth E2E with real ZITADEL, PostgreSQL, HTTPS, issued OAuth token, Gateway and `/opt`-scoped Broker **passed** ([GitHub Actions](https://github.com/josemirmoura/portico-infinity/actions/runs/38893160988)). Infinity uses `compose.infinity-auth.yaml` for dedicated Traefik labels and bootstrap volumes. The public ChatGPT/SRV-IA OAuth login is **not yet tested**.
+The independent Infinity OAuth E2E with real ZITADEL, PostgreSQL, HTTPS, issued OAuth token, Gateway and `/opt`-scoped Broker **passed** ([GitHub Actions](https://github.com/josemirmoura/portico-infinity/actions/runs/38893160988)). Infinity uses `compose.infinity-auth.yaml` for dedicated Traefik labels and bootstrap volumes. A real authenticated ChatGPT ↔ SRV-IA MCP session and typed filesystem operations were verified on 16/10/2026, but the public OAuth lifecycle, revocation and a complete E2E acceptance are **still pending**.
 
 ## Implementation status
 
-Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.
+Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. The Infinity-specific shell workspace confinement fix was merged in commit `76dbeec0f8b1eae992617ab008726273b026eca5` and tested in a disposable Docker E2E; operator deployment remains pending. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.
 
-The experimental entrypoint is now **`scripts/install-infinity.sh`**. It adds an opt-in `/opt` privileged-file policy, requires an isolated root-owned control plane in `/srv/portico-infinity`, and still **does not grant sudo/root shell or apt**. `--local-only` is a configuration preview that never starts privileged Docker. The previous `scripts/install-infinity-preview.sh` is permanently disabled because it did not enforce the `/srv` boundary. **No Infinity E2E acceptance has been completed.**
+The experimental entrypoint is now **`scripts/install-infinity.sh`**. It adds an opt-in `/opt` privileged-file policy, requires an isolated root-owned control plane in `/srv/portico-infinity`, and still **does not grant sudo/root shell or apt**. `--local-only` is a configuration preview that never starts privileged Docker. The previous `scripts/install-infinity-preview.sh` is permanently disabled because it did not enforce the `/srv` boundary. **The disposable Infinity Docker/OAuth acceptance was completed**; the SRV-IA installation is **partially validated**. The SHELL-001 source fix is merged but has **not yet been deployed on SRV-IA**. See [SRV-IA shell upgrade](docs/infinity/UPGRADE-SHELL-001-SRV-IA.md).
 
 ## License and origin
 
