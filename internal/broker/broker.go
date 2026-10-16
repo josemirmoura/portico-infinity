@@ -1708,6 +1708,18 @@ func (b *Broker) fileMutation(ctx context.Context, req wire.Request, fingerprint
 	}
 	value, err := fn()
 	if err != nil {
+		// Recursive deletion can have removed part of a directory before an
+		// I/O error, concurrent mutation or mount rejection. Never abort its
+		// journal entry: that would silently permit a blind retry with the
+		// same operation ID despite potentially irreversible side effects.
+		var removal struct {
+			Recursive bool `json:"recursive"`
+		}
+		if req.Tool == "file.remove" &&
+			json.Unmarshal(req.Args, &removal) == nil && removal.Recursive {
+			return deny(req.ID, "reconcile_required",
+				"recursive removal outcome may be partial; inspect the tree and audit before retrying: "+err.Error())
+		}
 		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
 		return deny(req.ID, "filesystem_error", err.Error())
 	}
