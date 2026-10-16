@@ -73,3 +73,32 @@ func TestRecursiveRemoveReportsPartialFailureAndKeepsProtectedOutsideTarget(t *t
 		t.Fatalf("expected an explicit deletion error, got %v", err)
 	}
 }
+
+
+func TestRecursiveRemoveMoreThanFiftyThousandEntries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large destructive filesystem acceptance")
+	}
+	base := t.TempDir()
+	m, err := New([]string{base}, []string{base}, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "large-tree")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const entries = 50053
+	for i := 0; i < entries; i++ {
+		name := filepath.Join(target, fmt.Sprintf("entry-%06d", i))
+		if err := os.WriteFile(name, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Remove(target, true); err != nil {
+		t.Fatalf("cannot remove 50k+ entries: %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("large tree still exists after successful return: %v", err)
+	}
+}
