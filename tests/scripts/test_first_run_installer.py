@@ -55,7 +55,7 @@ case "$1" in
     elif [ "$2" = invaliduser ]; then
       exit 1
     else
-      echo 1001
+      echo 51321
     fi ;;
   -gn) echo appgroup ;;
   *) exit 2 ;;
