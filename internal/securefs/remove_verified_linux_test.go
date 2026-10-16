@@ -101,3 +101,59 @@ func TestVerifiedRecursiveRemoveCannotDeleteAuthorizedRoot(t *testing.T) {
 		t.Fatal("authorized root deletion permitted")
 	}
 }
+
+
+func TestVerifiedRecursiveRemoveRejectsRacedSymlinkDirectory(t *testing.T) {
+	base := t.TempDir()
+	tree := filepath.Join(base, "target")
+	child := filepath.Join(tree, "child")
+	outside := filepath.Join(base, "outside")
+	for _, p := range []string{child, outside} {
+		if err := os.MkdirAll(p, 0750); err != nil { t.Fatal(err) }
+	}
+	external := filepath.Join(outside, "model.gguf")
+	if err := os.WriteFile(external, []byte("survive"), 0600); err != nil { t.Fatal(err) }
+	fs, err := New([]string{base}, []string{base}, 4096)
+	if err != nil { t.Fatal(err) }
+	swapped := false
+	err = fs.RemoveRecursiveVerified(tree, func(path string, _ bool) error {
+		if path == child && !swapped {
+			swapped = true
+			if err := os.Rename(child, child+"-old"); err != nil { return err }
+			return os.Symlink(outside, child)
+		}
+		return nil
+	})
+	if err == nil || !swapped {
+		t.Fatalf("concurrent directory swap was not detected: %v, swapped=%v", err, swapped)
+	}
+	got, readErr := os.ReadFile(external)
+	if readErr != nil || string(got) != "survive" {
+		t.Fatalf("outside content affected by symlink race: %q %v", got, readErr)
+	}
+}
+
+func TestVerifiedRecursiveRemoveReportsConcurrentSecretInsertion(t *testing.T) {
+	base := t.TempDir()
+	tree := filepath.Join(base, "target")
+	if err := os.Mkdir(tree, 0750); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(tree, "ordinary.gguf"), nil, 0600); err != nil { t.Fatal(err) }
+	fs, err := New([]string{base}, []string{base}, 4096)
+	if err != nil { t.Fatal(err) }
+	secret := filepath.Join(tree, ".env")
+	inserted := false
+	err = fs.RemoveRecursiveVerified(tree, func(path string, _ bool) error {
+		if path == filepath.Join(tree, "ordinary.gguf") && !inserted {
+			inserted = true
+			return os.WriteFile(secret, []byte("must-survive"), 0600)
+		}
+		return nil
+	})
+	if !inserted || !errors.Is(err, ErrPartialRemoval) {
+		t.Fatalf("expected partial-reconcile on concurrent secret injection, got %v", err)
+	}
+	got, readErr := os.ReadFile(secret)
+	if readErr != nil || string(got) != "must-survive" {
+		t.Fatalf("concurrent protected secret changed: %q %v", got, readErr)
+	}
+}
