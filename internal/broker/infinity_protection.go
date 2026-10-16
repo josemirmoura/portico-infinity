@@ -21,7 +21,7 @@ func infinityProtectedRoot() (string, bool) {
         return "", false
     }
     if !filepath.IsAbs(raw) || filepath.Clean(raw) != raw ||
-       raw == "/" || raw == "/opt" || !infinityWithin("/opt", raw) {
+       raw != "/srv/portico-infinity" {
         return "", true // configuration is unsafe; all mutations fail closed
     }
     return raw, false
@@ -45,7 +45,7 @@ func infinityTouchesProtected(path, root string) bool {
 
 // guardInfinityControlPath applies before dispatch to every typed filesystem
 // mutation. The internal policy and deployment source must not be editable
-// by their own AI client, even with a static /opt writable root.
+// by their own AI client, even with a static /opt writable root. The checkout is outside /opt.
 func guardInfinityControlPath(req wire.Request) *wire.Response {
     root, bad := infinityProtectedRoot()
     if root == "" && !bad {
