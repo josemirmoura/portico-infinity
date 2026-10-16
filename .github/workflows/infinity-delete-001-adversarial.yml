@@ -39,7 +39,7 @@ jobs:
             --mount "type=bind,source=$RUNNER_TEMP/portico-delete-test,target=/test,readonly" \
             -e PORTICO_REQUIRE_MOUNT_TEST=1 \
             ubuntu:24.04 /test \
-            -test.v -test.run '^TestRecursiveRemoveRejectsBindMountInsertedAfterPreflight$'
+            -test.v -test.run '^TestRecursiveRemoveRejectsBindMount'
       - name: Ensure tests did not modify checkout
         run: |
           set -euo pipefail
