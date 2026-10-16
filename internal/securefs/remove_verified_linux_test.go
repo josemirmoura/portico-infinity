@@ -157,3 +157,23 @@ func TestVerifiedRecursiveRemoveReportsConcurrentSecretInsertion(t *testing.T) {
 		t.Fatalf("concurrent protected secret changed: %q %v", got, readErr)
 	}
 }
+
+
+func TestVerifiedRecursiveRemoveDoesNotReadHugeLLMFile(t *testing.T) {
+	base := t.TempDir()
+	tree := filepath.Join(base, "models")
+	if err := os.Mkdir(tree, 0750); err != nil { t.Fatal(err) }
+	path := filepath.Join(tree, "sparse-100GiB.gguf")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil { t.Fatal(err) }
+	// Sparse fixture simulates a 100 GiB model without allocating its bytes.
+	if err := file.Truncate(100 << 30); err != nil { file.Close(); t.Fatal(err) }
+	if err := file.Close(); err != nil { t.Fatal(err) }
+	fs, err := New([]string{base}, []string{base}, 4096)
+	if err != nil { t.Fatal(err) }
+	if err := fs.RemoveRecursiveVerified(tree, func(_ string, protected bool) error {
+		if protected { t.Fatal("unlinked GGUF model unexpectedly protected") }
+		return nil
+	}); err != nil { t.Fatal(err) }
+	if _, err := os.Lstat(tree); !os.IsNotExist(err) { t.Fatalf("large file subtree still exists: %v", err) }
+}
