@@ -153,6 +153,9 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 	if !strings.HasPrefix(req.Tool, "admin.") && b.ExpectedSubject != "" && req.Subject != b.ExpectedSubject {
 		return deny(req.ID, "identity_mismatch", "subject is not authorized for this Broker")
 	}
+	if guarded := guardInfinityControlPath(req); guarded != nil {
+		return *guarded
+	}
 	if guarded := b.guardSensitiveRequest(ctx, req); guarded != nil {
 		return *guarded
 	}
