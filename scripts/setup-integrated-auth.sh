@@ -200,6 +200,36 @@ for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
 PY
 }
 
+# Infinity must never resolve or mutate the Community identity volumes.
+# Resolve Compose names using the installer-owned .env, not an implicit
+# shell-level override. This selection occurs BEFORE any bootstrap writes.
+AUTH_PROJECT_NAME="$(env_value COMPOSE_PROJECT_NAME || true)"
+if [ -n "${COMPOSE_PROJECT_NAME:-}" ] && [ -n "$AUTH_PROJECT_NAME" ] && [ "$COMPOSE_PROJECT_NAME" != "$AUTH_PROJECT_NAME" ]; then
+  echo 'INFINITY AUTH DENIED: shell COMPOSE_PROJECT_NAME conflicts with the installation .env' >&2
+  exit 2
+fi
+case "$AUTH_PROJECT_NAME" in
+  portico-infinity)
+    AUTH_COMPOSE_FILE=compose.infinity-auth.yaml
+    ZITADEL_BOOTSTRAP_VOLUME=portico-infinity_zitadel-bootstrap
+    # Two bundled public reverse proxies can conflict over host :80/:443.
+    if [ "$BUNDLED_PROXY" -eq 1 ]; then
+      echo 'INFINITY AUTH DENIED: bundled public proxy is disabled; use a dedicated external Traefik edge/tunnel' >&2
+      exit 2
+    fi
+    ;;
+  ''|mcp-vps-agent)
+    AUTH_PROJECT_NAME=mcp-vps-agent
+    AUTH_COMPOSE_FILE=compose.integrated-auth.yaml
+    ZITADEL_BOOTSTRAP_VOLUME=mcp-vps-agent_zitadel-bootstrap
+    ;;
+  *)
+    echo 'INFINITY AUTH DENIED: unsupported Compose project identity' >&2
+    exit 2
+    ;;
+esac
+export COMPOSE_PROJECT_NAME="$AUTH_PROJECT_NAME"
+
 marker_value() {
   python3 - "$1" "$2" <<'PY'
 import json, pathlib, sys
@@ -388,7 +418,7 @@ if [ -n "$OPERATOR_EMAIL" ]; then
 fi
 chmod 600 .env
 
-compose=(docker compose -f compose.yaml -f compose.integrated-auth.yaml)
+compose=(docker compose -f compose.yaml -f "$AUTH_COMPOSE_FILE")
 if [ "$BUNDLED_PROXY" -eq 1 ]; then
   compose+=(-f compose.integrated-auth.proxy.yaml)
 fi
@@ -466,7 +496,7 @@ if [ "$NEEDS_BOOTSTRAP" -eq 1 ]; then
   # intentionally contains almost no shell utilities.
   BOOTSTRAP_PAT="$(
     docker run --rm \
-      -v mcp-vps-agent_zitadel-bootstrap:/zitadel/bootstrap:ro \
+      -v "$ZITADEL_BOOTSTRAP_VOLUME:/zitadel/bootstrap:ro" \
       alpine:3.22 \
       cat /zitadel/bootstrap/bootstrap-admin.pat 2>/dev/null || true
   )"
@@ -494,7 +524,7 @@ if [ "$NEEDS_BOOTSTRAP" -eq 1 ]; then
 
   # Tighten bootstrap-volume permissions before any credential is consumed.
   docker run --rm \
-    -v mcp-vps-agent_zitadel-bootstrap:/zitadel/bootstrap \
+    -v "$ZITADEL_BOOTSTRAP_VOLUME:/zitadel/bootstrap" \
     alpine:3.22 \
     sh -c 'chmod 600 /zitadel/bootstrap/*.pat 2>/dev/null || true'
 
@@ -798,7 +828,7 @@ PY
   fi
 
   docker run --rm \
-    -v mcp-vps-agent_zitadel-bootstrap:/zitadel/bootstrap \
+    -v "$ZITADEL_BOOTSTRAP_VOLUME:/zitadel/bootstrap" \
     alpine:3.22 \
     rm -f /zitadel/bootstrap/bootstrap-admin.pat \
     >/dev/null 2>&1 || true
