@@ -1,19 +1,30 @@
 # Gates de aceite: Pórtico Infinity
 
-**Status:** planejado; nenhum E2E Infinity completado.
+**Status:** especificação, não executados para o perfil `opt-privileged`.
 
 | Gate | Requisito | Estado |
 | --- | --- | --- |
-| I0 | Git histórico do Community em repositório próprio e Apache-2.0 preservado | base main importada |
-| I1 | Identidade visual/docs independentes; nenhum efeito colateral Community | documentação inicial |
-| I2 | Instalador com confirmação ⚠️ e raiz `/opt` estática persistente | experimental, sem aceite |
-| I3 | Broker root persistente por sujeito fixo, sem autoaprovação | pendente |
-| I4 | Autenticação OAuth e portal HTTPS / túnel testados | pendente |
-| I5 | Leitura, escrita e shell em laboratório descartável; fora do teto negado para operações scoped | pendente |
-| I6 | Root: teste inofensivo, auditoria externa e revogação de emergência | pendente |
-| I7 | Reconexão/reboot mantém autoridade e recuperação de jobs | pendente |
-| I8 | E2E real com ChatGPT no SRV-IA depois dos testes descartáveis | pendente |
+| I0 | Histórico da `main` e Apache-2.0 preservados no repositório independente | concluído |
+| I1 | Identidade e documentação distintas, sem alterar Community/Cloud | parcialmente concluído |
+| I2 | Instalador opt-in e política persistente `/opt` auditável | preview existente, E2E pendente |
+| I3 | Broker: operações de arquivo privilegiadas **tipadas**, confinadas a `/opt`; shell não-root | base Community existente, testes Infinity pendentes |
+| I4 | OAuth/identidade MCP, túnel e revogação externa | pendente |
+| I5 | Adversarial: traversal, symlinks, hardlinks, montagens, segredos, `/proc`, TOCTOU e subject mismatch | pendente |
+| I6 | `shell.exec_admin`, Docker host/root e gestão global negados por padrão | pendente |
+| I7 | Reboot/reconexão mantêm autorização; revogação e restauração funcionam | pendente |
+| I8 | E2E real no SRV-IA, após testes em laboratório descartável | pendente |
+| I9 | Modo root global opcional, se implementado: gate independente | fora do MVP |
 
-## Regra de manutenção
+## Provas mínimas
 
-Pórtico Community segue separado e não recebe commits Infinity. Nunca migrar estado/segredos da Community ou do Cloud automaticamente. Instalação em ambiente existente exige processo de migração independente.
+- Criar, ler, editar, `chmod`, `chown` e remover arquivo de teste dentro de `/opt`; verificar auditoria por operação.
+- Negar operações fora de `/opt` e toda execução de shell root arbitrária.
+- Verificar que escrever em `/opt` não altera componentes do plano de controle; testar indireções perigosas de Docker/systemd e scripts privilegiados.
+- Confirmar que a política persistente sobrevive a reboot sem permitir autoaprovação ou acesso a outro sujeito.
+- Testar revogação externa e retorno ao estado seguro sem depender da IA.
+
+**Release:** não chamar `opt-privileged` de aprovado antes de CI + E2E. Não gerar ciclos de auditoria sem novos defeitos concretos; usar critérios objetivos de encerramento.
+
+## Regra
+
+Pórtico Community e Pórtico Cloud permanecem isolados. Não reaproveitar estado, portas, identidade ou segredos de produção.

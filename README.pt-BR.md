@@ -2,7 +2,7 @@
 
 **Edição pública experimental do Pórtico Community que permite delegar à IA, via MCP, acesso operacional permanente a um servidor Linux.**
 
-> ⚠️ **PRÉ-LANÇAMENTO.** O perfil root/sudo permanente ainda precisa ser implementado e auditado. O código herdado do Community está disponível, mas a edição Infinity ainda não está homologada para instalação no SRV-IA ou em servidores de terceiros.
+> ⚠️ **PRÉ-LANÇAMENTO.** O perfil de operações privilegiadas permanentes limitadas a `/opt` ainda precisa ser configurado e validado; o root global será separado e opt-in. O código herdado do Community está disponível, mas a edição Infinity ainda não está homologada para instalação no SRV-IA ou em servidores de terceiros.
 
 [English](README.md) · [Código de origem: Community](https://github.com/josemirmoura/mcp-vps-agent-gateway)
 
@@ -10,19 +10,20 @@
 
 O proprietário poderá autorizar **uma única vez**, sem prazo de expiração:
 - leitura, criação, edição e trabalho em `/opt`, inclusive novos projetos;
-- posteriormente, **execução administrativa root persistente**, ativada por decisão local explícita e vinculada a uma identidade MCP específica.
+- operações administrativas **tipadas e restritas a `/opt`** pelo Broker, como `chmod` e `chown`, sem shell root genérico, após configuração e E2E;
+- como opção avançada distinta, root global persistente, desativado por padrão e sujeito a uma decisão explícita do proprietário.
 
 A autenticação HTTPS/OAuth continua obrigatória. A autorização não implica sessão infinita no ChatGPT nem elimina confirmações do cliente, limites de duração de jobs ou a validade dos tokens OAuth.
 
-**⚠️ Root irrestrito alcança todo o host**, inclusive fora de `/opt`. O risco inclui perda de dados, comprometimento de credenciais, alterações nos serviços e execução de instruções maliciosas encontradas em arquivos. O desligamento de emergência e auditoria devem ter componentes externos à máquina administrada.
+**⚠️ Operações sobre `/opt` também apresentam riscos**, especialmente se a pasta contiver configurações, executáveis ou arquivos que algum serviço privilegiado utilizará. Root global alcança todo o host, inclusive fora de `/opt`. O risco inclui perda de dados, comprometimento de credenciais, alterações nos serviços e execução de instruções maliciosas encontradas em arquivos. O desligamento de emergência e auditoria devem ter componentes externos à máquina administrada.
 
 ## Estado da implementação
 
 - ✅ Repositório público independente e histórico `main` do Community importado.
 - ✅ Licença Apache-2.0 e atribuição original preservadas.
 - ✅ Especificação do perfil permanente documentada.
-- ⚠️ Wrapper de instalação experimental para `/opt` estático, **sem root permanente**.
-- ⏳ Broker/instalador para root persistente vinculado ao sujeito MCP.
+- ⚠️ Wrapper de instalação experimental para `/opt` estático, sem shell root nem perfil de operações privilegiadas Infinity aceito.
+- ⏳ Política/instalador para operações privilegiadas tipadas em `/opt` e sujeito MCP fixo; root global somente como modo avançado.
 - ⏳ Auditoria, revogação externa e E2E real no SRV-IA.
 
 O instalador histórico `scripts/install.sh` ainda corresponde ao comportamento do Community. Evite instalá-lo como se o Infinity estivesse pronto.
@@ -40,7 +41,7 @@ Projeto de Josemir Moura, derivado do [Pórtico MCP Community](https://github.co
 
 ## Contrato herdado de instalação (ainda sem homologação Infinity)
 
-O instalador herdado precisa validar HTTPS/OAuth, conectar o cliente MCP **ChatGPT Web**, executar uma chamada real autenticada `system.info` e conferir a auditoria do Broker **antes** de emitir `INSTALLATION COMPLETE`. O Infinity exigirá ainda os testes específicos do root persistente. O contrato do Community, isoladamente, não homologou a nova edição.
+O instalador herdado precisa validar HTTPS/OAuth, conectar o cliente MCP **ChatGPT Web**, executar uma chamada real autenticada `system.info` e conferir a auditoria do Broker **antes** de emitir `INSTALLATION COMPLETE`. O Infinity exigirá ainda os testes específicos das operações privilegiadas no `/opt` e da revogação externa. O contrato do Community, isoladamente, não homologou a nova edição.
 
 Documentação herdada em português:
 

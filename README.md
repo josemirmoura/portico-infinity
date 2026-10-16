@@ -2,19 +2,19 @@
 
 **Edição pública experimental do Pórtico Community para administração persistente de um Linux por uma IA autenticada via MCP.**
 
-> ⚠️ **PRÉ-LANÇAMENTO.** O acesso administrativo root permanente ainda está em desenvolvimento. Este repositório preserva o código histórico do Community, mas não comprova uma instalação Infinity pronta para uso. Não execute em um servidor de produção sem validação E2E independente.
+> ⚠️ **PRÉ-LANÇAMENTO.** O perfil Infinity de operações privilegiadas confinadas a `/opt` ainda precisa de validação E2E; o root global irrestrito será opcional e ficará desativado por padrão. Este repositório preserva o código histórico do Community, mas não comprova uma instalação Infinity pronta para uso. Não execute em um servidor de produção sem validação E2E independente.
 
 [Português (Brasil)](README.pt-BR.md) · [Community original](https://github.com/josemirmoura/mcp-vps-agent-gateway)
 
 ## Target
 
 - Operator-owned, opt-in, **non-expiring** authorization for read/write and ordinary work inside `/opt`.
-- Optional, separately enabled, **persistent privileged execution** for one explicitly authenticated MCP principal. This is planned, **not yet implemented**.
+- **Default design:** persistent, path-checked privileged filesystem operations inside `/opt` via the Broker. No generic root shell. Existing operations such as `file.chmod` and `file.chown` are available in Community but need an explicitly reviewed Infinity policy and E2E acceptance.
 - HTTPS, OAuth/OIDC, local Broker enforcement, audit trail, out-of-band emergency shutdown and revocation.
 - Ubuntu/Linux as the first target; optional outbound secure tunnel for machines without fixed public IP.
 - Distinct deployments, state, service identities and configuration from Pórtico Community and Cloud.
 
-**Important:** a root shell can act outside `/opt`; `/opt` is the default work directory, not a security boundary for root. Persistent server authorization does not disable OAuth token expiry, ChatGPT/tool confirmations, execution timeouts or chat session limits.
+**Optional future advanced mode:** persistent, unrestricted root shell behind a separate explicit operator decision, disabled by default. There is no secure generic `sudo` shell restricted only to `/opt`. Persistent server authorization does not disable OAuth token expiry, ChatGPT/tool confirmations, execution timeouts or chat session limits.
 
 ## Documents
 
@@ -27,7 +27,7 @@
 
 Community baseline copied from `josemirmoura/mcp-vps-agent-gateway`, commit `42a1bbe29660edf61e737fc882e7c126ebc10de3`. The **existing Community runtime remains intact** in the copy. Its current `scripts/install.sh` still implements Community behavior, not the completed Infinity feature.
 
-An **experimental** opt-in wrapper, `scripts/install-infinity-preview.sh`, configures persistent static `/opt` read/write/scoped work through inherited Community features, but does **not** grant root/sudo and has no Infinity E2E acceptance yet. It must not be advertised as full Infinity.
+An **experimental** opt-in wrapper, `scripts/install-infinity-preview.sh`, configures persistent static `/opt` read/write/scoped work through inherited Community features, but does **not** configure privileged file actions or a root/sudo shell and has no Infinity E2E acceptance yet. It must not be advertised as full Infinity.
 
 ## License and origin
 

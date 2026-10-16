@@ -1,0 +1,84 @@
+# PÓRTICO INFINITY: EXEMPLO EXPERIMENTAL, NÃO HOMOLOGADO.
+# Operações de arquivo privilegiadas e confinadas a /opt por Broker;
+# shell NÃO-root, Full e sudo/root geral DESLIGADOS.
+# Não aplique diretamente em produção. Revisar run_as, identidade e limites.
+version: 1
+mode: scoped
+features:
+  full_mode_enabled: false
+filesystem:
+  read:
+    - /opt
+  write:
+    - /opt
+  actions:
+    - list
+    - stat
+    - read
+    - mkdir
+    - write
+    - patch
+    - copy
+    - move
+    - remove
+    - remove_recursive
+    - hash
+    - chmod
+    - chown
+shell:
+  enabled: true
+  run_as: vps-agent-exec
+  cwd_roots:
+    - /opt
+  max_runtime_seconds: 900
+  max_output_bytes: 1048576
+  max_memory_bytes: 1073741824
+  max_tasks: 256
+  allow_host_read: false
+services:
+  inspect: []
+  manage: []
+  actions: []
+docker:
+  inspect: []
+  manage: []
+  actions: []
+compose:
+  inspect: []
+  manage: []
+  actions: []
+network:
+  mode: blocked
+  destinations: []
+diagnostics:
+  - system.disk
+  - system.memory
+  - process.list
+  - process.inspect
+  - network.listen
+packages:
+  inspect: []
+  manage: []
+  actions: []
+users:
+  inspect: []
+  manage: []
+  actions: []
+groups:
+  inspect: []
+  manage: []
+  actions: []
+firewall:
+  inspect: []
+  manage: []
+  actions: []
+privilege:
+  admin: broker-only
+replay:
+  require_idempotency_for_safe_writes: true
+  blind_retry_non_replay_safe: false
+grant:
+  required: true
+  max_ttl_minutes: 60
+  out_of_band_approval: true
+  step_up_auth: true
