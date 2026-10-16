@@ -9,7 +9,7 @@ PÓRTICO INFINITY: perfil experimental de /opt
 
 Uso: bash scripts/install-infinity.sh [opções]
 
-  --local-only               Apenas verificações locais, sem E2E público
+  --local-only               Prévia local, SEM subir contêineres ou realizar E2E
   --lang pt-BR|en            Idioma de instalação
   --run-as USUARIO           Identidade NÃO-root para o shell
   --domain HOST              Domínio público MCP/OAuth

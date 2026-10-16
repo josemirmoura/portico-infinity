@@ -86,7 +86,7 @@ class InfinityLocalBootstrapTest(unittest.TestCase):
             "--yes", "--ack-infinity-opt",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("CHECKPOINT LOCAL CONCLUÍDO", result.stdout)
+        self.assertIn("PRÉ-VISUALIZAÇÃO LOCAL INFINITY CONCLUÍDA", result.stdout)
         self.assertIn("INFINITY OPT:", result.stdout)
         policy = (self.root / "config" / "policy.yaml").read_text()
         self.assertIn("    - chmod", policy)
@@ -104,7 +104,8 @@ class InfinityLocalBootstrapTest(unittest.TestCase):
         self.assertTrue(self.docker_log.exists())
         commands = self.docker_log.read_text()
         self.assertIn("compose version", commands)
-        self.assertIn("up -d --build", commands)
+        self.assertNotIn("up -d --build", commands)
+        self.assertNotIn("FAKE VERIFY OK", result.stdout)
 
     def test_missing_approval_does_not_create_state_or_call_docker(self):
         result = self.run_script(
