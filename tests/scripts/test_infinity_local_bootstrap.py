@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COPY = (
     ".env.example", "compose.yaml", "VERSION",
     "scripts/install.sh", "scripts/install-infinity.sh", "scripts/init.sh",
+    "scripts/authority-summary.py",
     "scripts/configure-infinity-opt.py", "scripts/delegate-root.py",
     "scripts/lib/product.sh", "scripts/lib/i18n.py",
     "config/policy.example.yaml",
