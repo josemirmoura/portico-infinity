@@ -1,6 +1,6 @@
 # Pórtico Infinity | Entrada pública via VPS e túnel para SRV-IA
 
-**Situação em 16/10/2026:** plano aprovado conceitualmente; **NÃO instalado**. O SRV-IA permanece privado na rede doméstica. O E2E Docker e o E2E OAuth/ZITADEL foram aprovados **separadamente em runners descartáveis**; não houve conexão com a conta ChatGPT nem com o SRV-IA.
+**Situação em 16/10/2026:** plano aprovado conceitualmente; **NÃO instalado**. O proprietário informou que o subdomínio `infinity.josemirmoura.com.br` **já foi criado**; resolução DNS pública e IP de destino ainda precisam de confirmação independente. O SRV-IA permanece privado na rede doméstica. O E2E Docker e o E2E OAuth/ZITADEL foram aprovados **separadamente em runners descartáveis**; não houve conexão com a conta ChatGPT nem com o SRV-IA.
 
 ## Topologia escolhida
 
@@ -44,6 +44,19 @@ Todas utilizam o **mesmo hostname OAuth**, com TLS emitido na VPS. O Traefik dec
 | `/` (se exigido pelo provedor) | ZITADEL Login | Redirecionamento de tela inicial |
 
 **Cuidado:** o overlay `compose.infinity-auth.yaml` atualmente presume Traefik descobrindo labels Docker localmente. Na topologia proposta o Traefik de borda está em OUTRO host. **É necessário implementar e testar um overlay sem edge local**, expondo apenas os backends por IP da VPN (sem exposição `0.0.0.0`) e publicar regras **File Provider na VPS**. Não rodar `setup-integrated-auth.sh` em produção até essa separação estar validada. Não copiar arquivos/tokens de `domínio atual do Pórtico Community`.
+
+## Preflight não destrutivo no SRV-IA
+
+O script versionado [`scripts/srvia-preflight.sh`](../../scripts/srvia-preflight.sh) reúne DNS, interfaces, rotas, WireGuard/Tailscale, Docker, portas e conflitos com `/srv/portico-infinity`, **sem sudo e sem alterar arquivos ou serviços**.
+
+No terminal do próprio SRV-IA:
+
+```bash
+curl -fsSLo /tmp/srvia-preflight.sh https://raw.githubusercontent.com/josemirmoura/portico-infinity/main/scripts/srvia-preflight.sh
+bash /tmp/srvia-preflight.sh
+```
+
+**Não enviar chaves privadas, tokens ou arquivos `.env`.** O diagnóstico só imprime informações operacionais não secretas. O passo seguinte depende do resultado (talvez Tailscale já exista em ambas as máquinas, evitando novo WireGuard).
 
 ## Etapas de execução, com critérios objetivos
 
