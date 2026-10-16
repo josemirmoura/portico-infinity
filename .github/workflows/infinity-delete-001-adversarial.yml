@@ -15,6 +15,9 @@ permissions:
 jobs:
   destructive-lab:
     name: Large synthetic trees and privileged bind-mount denial
+    # Do not execute contributor-controlled PR code in a privileged
+    # container. External forks need a reviewed, maintainer-triggered run.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
