@@ -228,6 +228,9 @@ func (b *Broker) composeMutationAsync(ctx context.Context, req wire.Request, act
 		Resource: req.Resource, State: "starting", Deadline: time.Now().Add(composeJobRuntime),
 	}
 	if err := b.State.CreateJob(ctx, record); err != nil {
+		// Dispatch never happened, so the invocation must remain retryable
+		// after the storage fault is repaired. No Docker side effect exists.
+		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
 		return deny(req.ID, "state_error", "cannot persist Compose job before dispatch: "+err.Error())
 	}
 	if err := starter.StartComposeJob(ctx, req.Resource, action, jobID); err != nil {
