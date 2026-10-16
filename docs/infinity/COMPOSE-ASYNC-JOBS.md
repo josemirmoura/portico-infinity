@@ -1,6 +1,6 @@
 # Operações Compose assíncronas e duráveis no Infinity
 
-**Situação:** implementação em branch de desenvolvimento, **NÃO implantada nem homologada em produção**. Issue relacionada: [#9](https://github.com/josemirmoura/portico-infinity/issues/9).
+**Situação (16/10/2026):** PR [#11](https://github.com/josemirmoura/portico-infinity/pull/11) fundido ao `main` no commit imutável `a16bd9a805106d9cec8bd7597b0f75e44fdde0be`, após **12/12 workflows aprovados** no head final. **NÃO implantado nem homologado no SRV-IA de produção**. Próximo passo: [runbook de atualização protegida](UPGRADE-COMPOSE-ASYNC-SRV-IA.md). Issue relacionada: [#9](https://github.com/josemirmoura/portico-infinity/issues/9).
 
 ## Problema
 
