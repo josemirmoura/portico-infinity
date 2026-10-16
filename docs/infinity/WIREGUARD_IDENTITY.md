@@ -40,6 +40,63 @@ sudo bash /tmp/infinity-wg-keygen.sh vps
 
 A chave privada será `/etc/wireguard/infinity-vps.key`, root-only, distinta da chave do SRV-IA.
 
+## Etapa 3: preparar a configuração dos dois peers (sem ativação)
+
+**Status da sessão 16/10/2026:** chaves públicas geradas nas duas máquinas; SRV-IA informa Docker Server 29.9.0 e DNS resolvendo `infinity.josemirmoura.com.br` para a VPS. Na VPS, UFW ativo com entrada padrão bloqueada, sem regra UDP 51822; WireGuard instalado e chave VPS gerada. **Há kernel novo pendente na VPS: não reiniciar durante este procedimento.**
+
+O script `scripts/infinity-wg-configure.py` lê a chave privada **somente do arquivo local** protegido, confere o par com `wg pubkey`, recusa symlinks, caminhos existentes, interface ativa ou colisão com a rede `10.88.88.0/30`, e cria `/etc/wireguard/wg-infinity.conf` com `0600` de maneira exclusiva. Não modifica UFW, não ativa rede nem inicia serviço.
+
+**Na VPS** (somente depois de obter a chave pública do SRV-IA, já recebida pelo operador nesta sessão):
+
+```bash
+curl -fsSLo /tmp/infinity-wg-configure.py \
+  https://raw.githubusercontent.com/josemirmoura/portico-infinity/main/scripts/infinity-wg-configure.py
+python3 -m py_compile /tmp/infinity-wg-configure.py
+sudo python3 /tmp/infinity-wg-configure.py --role vps \
+  --peer-public-key 'ISoJ4wVIHSIutvCxXa9gj8Z404nrxxazOUJedTm5+BU='
+sudo stat -c '%n %a %U:%G' /etc/wireguard/wg-infinity.conf
+```
+
+**No SRV-IA** (somente depois de obter a chave pública da VPS):
+
+```bash
+curl -fsSLo /tmp/infinity-wg-configure.py \
+  https://raw.githubusercontent.com/josemirmoura/portico-infinity/main/scripts/infinity-wg-configure.py
+python3 -m py_compile /tmp/infinity-wg-configure.py
+sudo python3 /tmp/infinity-wg-configure.py --role srv-ia \
+  --peer-public-key 'mXHJ+IGjNoqYmoiOjWNQaG+fh31Z6jD9FnhlM/UaQwU=' \
+  --endpoint-ip 85.209.93.51
+sudo stat -c '%n %a %U:%G' /etc/wireguard/wg-infinity.conf
+```
+
+As duas chaves acima são **públicas**. Nenhuma chave privada foi colocada neste documento. A configuração `wg-infinity.conf` contém a chave privada local, portanto **não executar `cat` nesse arquivo nem enviá-lo ao chat**. `sudo wg-quick strip wg-infinity >/dev/null` valida o formato do arquivo sem revelar a chave (só depois de a configuração existir).
+
+## Etapa 4: ativação controlada, depois de revisar o UFW
+
+Antes de qualquer mudança, salvar a saída de `sudo ufw status verbose` da VPS e conferir também o UFW do SRV-IA. Na VPS, exclusivamente para WireGuard, a regra necessária é:
+
+```bash
+sudo ufw allow 51822/udp comment 'Portico Infinity WireGuard'
+sudo ufw status numbered
+```
+
+Esse comando altera apenas UFW e deve ser realizado **após conferir o arquivo de configuração nos dois hosts** e assegurar que a hospedagem/provedor não bloqueia UDP. Não alterar portas 22, 80, 443, Tailscale ou regras atuais.
+
+1. Na **VPS**: `sudo systemctl start wg-quick@wg-infinity` (sem `enable` inicial).
+2. No **SRV-IA**: `sudo systemctl start wg-quick@wg-infinity` (sem `enable` inicial).
+3. No SRV-IA: `sudo wg show wg-infinity latest-handshakes` e `sudo wg show wg-infinity transfer`; na VPS as mesmas consultas. Um handshake recente e tráfego autenticado nos dois sentidos confirmam a primeira comunicação. Se necessário, enviar um pacote de prova com `ping -c 2 -W 2 10.88.88.1` no SRV-IA; eventual ausência de ping não prova ausência de handshake, pois pode haver filtro ICMP.
+4. Confirmar que a rota padrão e o link direto i7↔SRV-IA permanecem intactos: `ip -4 route` e `ip -4 route get 10.77.77.1`.
+
+**Plano de reversão imediato** caso haja comportamento inesperado:
+
+```bash
+sudo systemctl stop wg-quick@wg-infinity
+```
+
+Na VPS, se necessário, também remover **exclusivamente** a regra UFW criada para o Infinity mediante inspeção de `sudo ufw status numbered`, sem limpar regras preexistentes.
+
+Somente após handshake e teste de tráfego estáveis decidir se os dois serviços devem iniciar no boot com `systemctl enable wg-quick@wg-infinity`. A atualização de kernel pendente da VPS deve ser agendada separadamente, não como parte deste gate.
+
 ## Etapa 3: parear sem divulgar segredos
 
 Trocar **apenas** as chaves públicas dos dois peers. Usar `wg-quick` e interface `wg-infinity` em ambos os hosts, com endereços ainda sujeitos a confirmação:
