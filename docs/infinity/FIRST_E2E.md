@@ -15,6 +15,10 @@
 
 O código do controlador permanece fora de `/opt`, inclusive nos testes. Não instalar a cópia Infinity em `/opt` nem misturar `.env`, volumes, identidade ou portas com Community/Cloud.
 
+## Resultado experimental já executado
+
+O E2E local Docker concluído com sucesso está documentado em [Critérios de aceite](ACCEPTANCE.md#evidência-e2e-docker-real-16102026). O workflow reproduz contêineres reais e usa autenticação estática de laboratório. **Ele não substitui a instalação pública/OAuth nem a validação no SRV-IA.**
+
 ## Gate 0: verificar a máquina descartável
 
 Antes de alterar a máquina, registrar hostname, arquitetura, Docker/Compose, portas ocupadas, versão do kernel, disco disponível e ponto de restauração. A primeira execução não deve ocorrer na VPS de produção ou no SRV-IA.
