@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -165,7 +166,12 @@ func verifiedRemoveEntry(parentFD int, name, canonical string, check func(string
 // again immediately before unlink, independently of the Broker preflight.
 func protectedEntryName(path string) bool {
 	name := filepath.Base(filepath.Clean(path))
-	return name == ".env" ||
-		(len(name) > len(".env.") && name[:len(".env.")] == ".env." &&
-			name != ".env.example" && name != ".env.sample" && name != ".env.template")
+	if name == ".env" {
+		return true
+	}
+	switch name {
+	case ".env.example", ".env.sample", ".env.template":
+		return false
+	}
+	return strings.HasPrefix(name, ".env.")
 }
