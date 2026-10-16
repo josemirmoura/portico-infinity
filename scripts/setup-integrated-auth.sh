@@ -24,6 +24,7 @@ Opções:
   --edge-network REDE       Rede Docker de um Traefik existente.
   --certresolver NOME       Resolvedor ACME do Traefik existente.
   --bundled-proxy           Força o Traefik embutido em vez de reutilizar um.
+  --remote-edge             Usar túnel e proxy público separado na VPS (Infinity).
   -h, --help                Mostra esta ajuda.
 
 A senha dedicada do operador OAuth é solicitada localmente sem aparecer no
@@ -43,6 +44,7 @@ Options:
   --edge-network NETWORK   Existing Traefik Docker network.
   --certresolver NAME      Existing Traefik ACME resolver.
   --bundled-proxy          Force the bundled Traefik instead of reusing one.
+  --remote-edge            External VPS public proxy over WireGuard (Infinity).
   -h, --help               Show this help.
 
 The dedicated OAuth operator password is requested locally without terminal
@@ -58,6 +60,7 @@ OPERATOR_USERNAME_EXPLICIT=0
 EDGE_NETWORK=""
 CERTRESOLVER=""
 BUNDLED_PROXY=0
+REMOTE_EDGE=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -77,6 +80,7 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || { echo "$(vps_agent_text 'ERROR: --certresolver needs a value.' 'ERRO: --certresolver precisa de um valor.')" >&2; exit 2; }
       CERTRESOLVER="$2"; shift 2 ;;
     --bundled-proxy) BUNDLED_PROXY=1; shift ;;
+    --remote-edge) REMOTE_EDGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "$(vps_agent_text "ERROR: unknown argument: $1" "ERRO: argumento desconhecido: $1")" >&2; usage >&2; exit 2 ;;
   esac
@@ -212,6 +216,16 @@ case "$AUTH_PROJECT_NAME" in
   portico-infinity)
     AUTH_COMPOSE_FILE=compose.infinity-auth.yaml
     ZITADEL_BOOTSTRAP_VOLUME=portico-infinity_zitadel-bootstrap
+    if [ "$REMOTE_EDGE" -eq 1 ]; then
+      if [ "$(env_value INFINITY_REMOTE_EDGE || true)" != "1" ] || [ -z "$(env_value INFINITY_WG_BIND_ADDRESS || true)" ]; then
+        echo 'INFINITY REMOTE DENIED: installation is not marked for remote WireGuard edge' >&2
+        exit 2
+      fi
+      AUTH_COMPOSE_FILE=compose.infinity-auth.remote.yaml
+    elif [ "$(env_value INFINITY_REMOTE_EDGE || true)" = "1" ]; then
+      echo 'INFINITY REMOTE DENIED: must pass --remote-edge for this existing installation' >&2
+      exit 2
+    fi
     # Two bundled public reverse proxies can conflict over host :80/:443.
     if [ "$BUNDLED_PROXY" -eq 1 ]; then
       echo 'INFINITY AUTH DENIED: bundled public proxy is disabled; use a dedicated external Traefik edge/tunnel' >&2
@@ -219,6 +233,10 @@ case "$AUTH_PROJECT_NAME" in
     fi
     ;;
   ''|mcp-vps-agent)
+    if [ "$REMOTE_EDGE" -eq 1 ]; then
+      echo 'INFINITY REMOTE DENIED: remote edge is only for an Infinity Compose project' >&2
+      exit 2
+    fi
     AUTH_PROJECT_NAME=mcp-vps-agent
     AUTH_COMPOSE_FILE=compose.integrated-auth.yaml
     ZITADEL_BOOTSTRAP_VOLUME=mcp-vps-agent_zitadel-bootstrap
@@ -300,6 +318,13 @@ else
   echo "  $(vps_agent_text 'Username' 'Nome de usuário'): $OPERATOR_USERNAME"
 fi
 
+if [ "$REMOTE_EDGE" -eq 1 ]; then
+  # The public Traefik runs on the VPS. Never discover/start/replace a local
+  # proxy, and never bind published ports outside INFINITY_WG_BIND_ADDRESS.
+  EDGE_NETWORK=remote-wireguard
+  CERTRESOLVER=external-vps
+  BUNDLED_PROXY=0
+else
 mapfile -t TRAEFIK_IDS < <(
   docker ps --format '{{.ID}} {{.Image}}' |
     awk 'tolower($0) ~ /traefik/ {print $1}'
@@ -385,6 +410,8 @@ print(values[0] if len(values)==1 else "")
   fi
 fi
 
+fi # REMOTE_EDGE bypassed local Traefik discovery
+
 MASTERKEY="$(env_value ZITADEL_MASTERKEY || true)"
 POSTGRES_PASSWORD="$(env_value ZITADEL_POSTGRES_PASSWORD || true)"
 BOOTSTRAP_ADMIN_PASSWORD="$(env_value ZITADEL_BOOTSTRAP_ADMIN_PASSWORD || true)"
@@ -434,6 +461,8 @@ echo "  $(vps_agent_text 'edge network' 'rede de borda'): $EDGE_NETWORK"
 echo "  $(vps_agent_text 'certificate resolver' 'resolvedor de certificado'): $CERTRESOLVER"
 if [ "$BUNDLED_PROXY" -eq 1 ]; then
   echo "  proxy: $(vps_agent_text 'bundled Traefik (Portico-managed)' 'Traefik embutido (gerenciado pelo Portico)')"
+elif [ "$REMOTE_EDGE" -eq 1 ]; then
+  echo "  proxy: $(vps_agent_text 'remote VPS Traefik + dedicated Infinity edge bridge' 'Traefik remoto na VPS + ponte dedicada Infinity')"
 else
   echo "  proxy: $(vps_agent_text 'existing Traefik (reused)' 'Traefik existente (reutilizado)')"
 fi
