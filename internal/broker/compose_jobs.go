@@ -195,8 +195,15 @@ func (b *Broker) composeMutationAsync(ctx context.Context, req wire.Request, act
 	// The Broker serializes mutation dispatch through auditMutationMu. Check
 	// all subjects so a second OAuth principal cannot mutate the same Compose
 	// project while a previous Docker job is running.
+	// If no external job has been dispatched, an operation rejected as busy
+	// must remain retryable with the SAME operation_id. Only an uncertain
+	// systemd dispatch is intentionally left pending for reconciliation.
+	abortBeforeDispatch := func() {
+		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
+	}
 	active, err := b.State.ListActiveJobs(ctx)
 	if err != nil {
+		abortBeforeDispatch()
 		return deny(req.ID, "state_error", err.Error())
 	}
 	for _, record := range active {
@@ -206,9 +213,11 @@ func (b *Broker) composeMutationAsync(ctx context.Context, req wire.Request, act
 		}
 		current, statusErr := b.composeJobStatus(ctx, record)
 		if statusErr != nil {
+			abortBeforeDispatch()
 			return deny(req.ID, "resource_busy", "earlier Compose job status uncertain; inspect before proceeding")
 		}
 		if current.State != "done" && current.State != "failed" && current.State != "cancelled" {
+			abortBeforeDispatch()
 			return deny(req.ID, "resource_busy", "another Compose job is running for this project")
 		}
 	}
