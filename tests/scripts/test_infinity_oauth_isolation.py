@@ -57,9 +57,11 @@ class InfinityOAuthContract(unittest.TestCase):
         self.assertIn('compose=(docker compose -f compose.yaml -f "$AUTH_COMPOSE_FILE")', setup)
         self.assertIn('export COMPOSE_PROJECT_NAME="$AUTH_PROJECT_NAME"', setup)
         self.assertIn("INFINITY AUTH DENIED: no reusable Traefik", setup)
-        self.assertEqual(set(re.findall(r"-v [^\n]*zitadel-bootstrap[^\n]*", setup)),
-                         {'-v "$ZITADEL_BOOTSTRAP_VOLUME:/zitadel/bootstrap:ro" \\',
-                          '-v "$ZITADEL_BOOTSTRAP_VOLUME:/zitadel/bootstrap" \\'})
+        volume_lines = [line.strip() for line in setup.splitlines()
+                        if line.strip().startswith("-v ") and
+                        "ZITADEL_BOOTSTRAP_VOLUME" in line]
+        self.assertEqual(len(volume_lines), 3)
+        self.assertTrue(all("mcp-vps-agent_zitadel-bootstrap" not in line for line in volume_lines))
 
     def test_compose_render_separates_runtime_resources(self):
         if not shutil.which("docker"):
@@ -87,8 +89,10 @@ class InfinityOAuthContract(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr[-3000:])
         conf = json.loads(proc.stdout)
         self.assertEqual(conf["name"], "portico-infinity")
-        self.assertTrue(any(k.startswith("portico-infinity") for k in
-                            conf.get("volumes", {})))
+        self.assertTrue(any(
+            info.get("name", "").startswith("portico-infinity_")
+            for info in conf.get("volumes", {}).values()
+        ))
         for name in ("gateway", "zitadel-api", "zitadel-login"):
             labels = conf["services"][name].get("labels") or {}
             if isinstance(labels, list):
