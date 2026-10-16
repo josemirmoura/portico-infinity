@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'internal/broker/**'
+      - 'internal/securefs/**'
+      - 'internal/sensitive/**'
       - 'tests/integration/infinity-docker-probe/**'
       - '.github/workflows/infinity-disposable-e2e.yml'
   push:
@@ -52,6 +54,20 @@ jobs:
             echo 'E2E BLOCKED: Infinity resources already exist on runner' >&2
             exit 1
           } || test "${PIPESTATUS[0]}" -eq 0
+
+      - name: DELETE-001 same-device bind mount denial in disposable privileged container
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/delete001-go-build-cache"
+          docker run --rm --privileged --network none \
+            -e GOPROXY=off \
+            -e PORTICO_BIND_MOUNT_REQUIRED=1 \
+            -v "$GITHUB_WORKSPACE:/src:ro" \
+            -v "$(go env GOPATH)/pkg/mod:/go/pkg/mod:ro" \
+            -v "$RUNNER_TEMP/delete001-go-build-cache:/root/.cache/go-build" \
+            -w /src golang:1.27.2-bookworm \
+            go test ./internal/sensitive -run TestDelete001SameDeviceBindMountDenied -count=1 -v
 
       - name: Prepare protected controller and /opt proof directory
         shell: bash

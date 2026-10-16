@@ -49,7 +49,8 @@ class InfinityOptPolicyTests(unittest.TestCase):
         self.assertEqual(lists[("filesystem", "actions")], list(MOD.FILE_ACTIONS))
         for field in MOD.ROOT_KEYS:
             self.assertEqual(lists[field], ["/opt"])
-        self.assertNotIn("remove_recursive", lists[("filesystem", "actions")])
+        self.assertIn("remove_recursive", lists[("filesystem", "actions")])
+        self.assertNotIn("*", lists[("filesystem", "actions")])
         self.assertIn("full_mode_enabled: false", text)
         self.assertEqual(stat.S_IMODE(self.policy.stat().st_mode), 0o600)
 

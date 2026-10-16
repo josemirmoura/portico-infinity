@@ -18,7 +18,9 @@ spec = importlib.util.spec_from_file_location("delegated_roots", delegate_file)
 delegate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(delegate)
 
-FILE_ACTIONS = ("list", "stat", "read", "mkdir", "write", "patch", "copy", "move", "remove", "hash", "chmod", "chown")
+# Recursive removal is explicit and remains gated by the Broker's per-path
+# sensitive preflight and verified inode/mount checks. No wildcard authority.
+FILE_ACTIONS = ("list", "stat", "read", "mkdir", "write", "patch", "copy", "move", "remove", "remove_recursive", "hash", "chmod", "chown")
 ROOT_KEYS = (("filesystem", "read"), ("filesystem", "write"), ("shell", "cwd_roots"))
 DENY_LISTS = (("services", "manage"), ("services", "actions"),
               ("docker", "manage"), ("docker", "actions"),

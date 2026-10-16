@@ -56,12 +56,12 @@ func main() {
 		bytes, readErr := io.ReadAll(io.LimitReader(file, 256))
 		return string(bytes), readErr
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "infinity-docker-e2e", Version: "v1"}, nil)
 	tr := &mcp.StreamableClientTransport{
 		Endpoint: *endpoint,
-		HTTPClient: &http.Client{Transport: bearerTransport{token: token}, Timeout: 15 * time.Second},
+		HTTPClient: &http.Client{Transport: bearerTransport{token: token}, Timeout: 120 * time.Second},
 	}
 	session, err := client.Connect(ctx, tr, nil)
 	if err != nil {
@@ -81,7 +81,13 @@ func main() {
 			if callErr != nil {
 				r.Detail = callErr.Error()
 			} else if resp != nil {
-				r.Detail = fmt.Sprintf("unexpected IsError=%t", resp.IsError)
+				content, encodeErr := json.Marshal(resp.Content)
+				if encodeErr != nil {
+					r.Detail = fmt.Sprintf("unexpected IsError=%t (cannot encode details)", resp.IsError)
+				} else {
+					if len(content) > 1024 { content = content[:1024] }
+					r.Detail = fmt.Sprintf("unexpected IsError=%t content=%s", resp.IsError, content)
+				}
 			} else {
 				r.Detail = "missing MCP tool response"
 			}
@@ -150,6 +156,36 @@ func main() {
 	add("service.restart", false, map[string]any{"name": "docker.service"})
 	add("docker.action", false, map[string]any{"name": "portico-infinity-broker-1", "action": "restart"})
 	add("file.remove", true, map[string]any{"path": target})
+	// Regression DELETE-001: after the ordinary shell tests, create >50k
+	// safe files inside the disposable workspace. The creation job is
+	// dispatched BEFORE the tree grows, so normal shell masks remain bounded.
+	large := filepath.Join(*directory, "delete-bulk")
+	add("file.mkdir", true, map[string]any{"path": large})
+	add("shell.exec", true, map[string]any{
+		"cwd": *directory, "runtime_seconds": 80,
+		"command": "python3 -c 'import pathlib; d=pathlib.Path(\"delete-bulk\"); [(d / f\"chunk-{i:06d}.gguf\").touch() for i in range(50032)]' && printf ready > delete-bulk-ready.txt",
+	})
+	ready := false
+	for attempt := 0; attempt < 150; attempt++ {
+		if data, readErr := readLabProof("delete-bulk-ready.txt"); readErr == nil && data == "ready" {
+			ready = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	results = append(results, result{Case: "DELETE-001 real shell generated >50k files", Passed: ready})
+	fail = fail || !ready
+	if ready {
+		add("file.remove", true, map[string]any{"path": large, "recursive": true})
+		_, statErr := lab.Stat("delete-bulk")
+		gone := os.IsNotExist(statErr)
+		results = append(results, result{Case: "DELETE-001 real MCP removes >50k entries", Passed: gone})
+		fail = fail || !gone
+	}
 	// A wrong token must not establish a live MCP session.
 	badTr := &mcp.StreamableClientTransport{
 		Endpoint: *endpoint,
