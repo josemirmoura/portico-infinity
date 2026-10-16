@@ -53,7 +53,7 @@ curl -fsSLo /tmp/infinity-wg-configure.py \
   https://raw.githubusercontent.com/josemirmoura/portico-infinity/main/scripts/infinity-wg-configure.py
 python3 -m py_compile /tmp/infinity-wg-configure.py
 sudo python3 /tmp/infinity-wg-configure.py --role vps \
-  --peer-public-key 'ISoJ4wVIHSIutvCxXa9gj8Z404nrxxazOUJedTm5+BU='
+  --peer-public-key '<CHAVE_PUBLICA_SRV_IA>'
 sudo stat -c '%n %a %U:%G' /etc/wireguard/wg-infinity.conf
 ```
 
@@ -64,12 +64,12 @@ curl -fsSLo /tmp/infinity-wg-configure.py \
   https://raw.githubusercontent.com/josemirmoura/portico-infinity/main/scripts/infinity-wg-configure.py
 python3 -m py_compile /tmp/infinity-wg-configure.py
 sudo python3 /tmp/infinity-wg-configure.py --role srv-ia \
-  --peer-public-key 'mXHJ+IGjNoqYmoiOjWNQaG+fh31Z6jD9FnhlM/UaQwU=' \
-  --endpoint-ip 85.209.93.51
+  --peer-public-key '<CHAVE_PUBLICA_VPS>' \
+  --endpoint-ip <IP_PUBLICO_VPS>
 sudo stat -c '%n %a %U:%G' /etc/wireguard/wg-infinity.conf
 ```
 
-As duas chaves acima são **públicas**. Nenhuma chave privada foi colocada neste documento. A configuração `wg-infinity.conf` contém a chave privada local, portanto **não executar `cat` nesse arquivo nem enviá-lo ao chat**. `sudo wg-quick strip wg-infinity >/dev/null` valida o formato do arquivo sem revelar a chave (só depois de a configuração existir).
+Substitua os parâmetros entre sinais de maior e menor pelos valores públicos já conhecidos apenas na sessão operacional; não publique identificadores do laboratório no repositório. Nenhuma chave privada foi colocada neste documento. A configuração `wg-infinity.conf` contém a chave privada local, portanto **não executar `cat` nesse arquivo nem enviá-lo ao chat**. `sudo wg-quick strip wg-infinity >/dev/null` valida o formato do arquivo sem revelar a chave (só depois de a configuração existir).
 
 ## Etapa 4: ativação controlada, depois de revisar o UFW
 
