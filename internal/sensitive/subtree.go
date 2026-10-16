@@ -27,6 +27,11 @@ func VisitProtectedSubtree(hostRoot, target string, visit func(string) error) er
 		return errors.New("sensitive subtree visitor is required")
 	}
 	physical := hostPath(hostRoot, target)
+	// The target itself may be a bind mount into a foreign tree.
+	// st_dev alone cannot detect a same-device bind mount.
+	if err := rejectMountBoundary(filepath.Dir(physical), physical); err != nil {
+		return err
+	}
 	initial, err := os.Lstat(physical)
 	if err != nil {
 		return err
@@ -66,6 +71,10 @@ func VisitProtectedSubtree(hostRoot, target string, visit func(string) error) er
 				return err
 			}
 			for _, entry := range entries {
+				// Detect bind mounts even when parent/child share st_dev.
+				if err := rejectMountEntry(dir, entry.Name()); err != nil {
+					return err
+				}
 				child := filepath.Join(rel, entry.Name())
 				info, statErr := root.Lstat(child)
 				if statErr != nil {
