@@ -397,6 +397,37 @@ chmod 600 .env
 
 if [ "$INFINITY_OPT" -eq 1 ]; then
   python3 scripts/configure-infinity-opt.py --policy config/policy.yaml --env .env
+  # Static instance naming and a protected controller checkout. Fresh installs only.
+  python3 - .env <<'PY'
+from pathlib import Path
+import sys
+path=Path(sys.argv[1])
+values={
+    "COMPOSE_PROJECT_NAME": "portico-infinity",
+    "VPS_AGENT_INSTANCE_NAME": "portico-infinity",
+    "VPS_AGENT_INFINITY_PROTECTED_ROOT": "/opt/portico-infinity",
+    "VPS_AGENT_PORT": "18081",
+    "VPS_AGENT_GATEWAY_IMAGE": "portico-infinity-gateway:local",
+    "VPS_AGENT_BROKER_IMAGE": "portico-infinity-broker:local",
+}
+lines=path.read_text().splitlines()
+found=set()
+out=[]
+for line in lines:
+    name=line.partition("=")[0]
+    if name in values:
+        if name in found:
+            raise SystemExit("duplicated .env key: "+name)
+        found.add(name)
+        out.append(name+"="+values[name])
+    else:
+        out.append(line)
+for name,value in values.items():
+    if name not in found:
+        out.append(name+"="+value)
+path.write_text("\n".join(out)+"\n")
+PY
+  chmod 600 .env
 fi
 
 if [ "$PROFILE" = "custom" ]; then
