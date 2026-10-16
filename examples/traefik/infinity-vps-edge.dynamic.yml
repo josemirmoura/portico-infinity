@@ -1,0 +1,39 @@
+# Configuração proposta para Traefik VPS: EXEMPLO, NÃO ATIVAR
+# Arquivo para File Provider (não Docker labels). IP/portas ainda por validar.
+# O HTTPS público termina na VPS. O backend passa exclusivamente por WireGuard.
+http:
+  routers:
+    infinity-mcp:
+      rule: "Host(`infinity.josemirmoura.com.br`) && (PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || Path(`/healthz`))"
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+      priority: 1000
+      service: infinity-mcp-upstream
+    infinity-login:
+      rule: "Host(`infinity.josemirmoura.com.br`) && (PathPrefix(`/ui/v2/login`) || Path(`/`))"
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+      priority: 600
+      service: infinity-login-upstream
+    infinity-oauth:
+      rule: "Host(`infinity.josemirmoura.com.br`) && (PathPrefix(`/oauth/v2`) || PathPrefix(`/oidc/v1`) || PathPrefix(`/v2`) || Path(`/.well-known/openid-configuration`) || Path(`/.well-known/oauth-authorization-server`))"
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+      priority: 700
+      service: infinity-oauth-upstream
+  services:
+    infinity-mcp-upstream:
+      loadBalancer:
+        servers:
+          - url: "http://10.88.88.2:18081"
+    infinity-oauth-upstream:
+      loadBalancer:
+        servers:
+          - url: "http://10.88.88.2:18082"
+    infinity-login-upstream:
+      loadBalancer:
+        servers:
+          - url: "http://10.88.88.2:18083"
