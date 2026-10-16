@@ -452,7 +452,27 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 			return deny(req.ID, "permission_denied", action+" is disabled by policy")
 		}
 		return b.fileMutation(ctx, req, in, func() (any, error) {
-			err := fs.Remove(req.Resource, in.Recursive)
+			var err error
+			protectedRoot, invalid := infinityProtectedRoot()
+			if invalid {
+				return nil, errors.New("invalid Infinity protected root configuration")
+			}
+			if in.Recursive && protectedRoot != "" {
+				// Extra per-inode gate closes the time gap between the
+				// sensitive subtree preflight and actual unlink.
+				access, accessErr := b.activeSensitiveAccess(ctx, req.Subject)
+				if accessErr != nil {
+					return nil, accessErr
+				}
+				err = fs.RemoveRecursiveVerified(req.Resource, func(path string, protected bool) error {
+					if protected && access[filepath.Clean(path)] != "work" {
+						return fmt.Errorf("protected path %s requires separate work approval", path)
+					}
+					return nil
+				})
+			} else {
+				err = fs.Remove(req.Resource, in.Recursive)
+			}
 			return map[string]any{"path": req.Resource, "removed": err == nil, "recursive": in.Recursive}, err
 		})
 	case "file.chmod":
@@ -1708,6 +1728,12 @@ func (b *Broker) fileMutation(ctx context.Context, req wire.Request, fingerprint
 	}
 	value, err := fn()
 	if err != nil {
+		if errors.Is(err, securefs.ErrPartialRemoval) {
+			// An interrupted recursive removal may have removed entries.
+			// Do not abort its idempotency record or allow an automatic
+			// retry that could delete a changed tree.
+			return deny(req.ID, "reconcile_required", err.Error())
+		}
 		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
 		return deny(req.ID, "filesystem_error", err.Error())
 	}
