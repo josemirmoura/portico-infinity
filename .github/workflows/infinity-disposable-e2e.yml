@@ -1,6 +1,11 @@
 name: infinity-real-docker-disposable-e2e
 
 on:
+  pull_request:
+    paths:
+      - 'internal/broker/**'
+      - 'tests/integration/infinity-docker-probe/**'
+      - '.github/workflows/infinity-disposable-e2e.yml'
   push:
     branches: [main]
     paths:
@@ -60,7 +65,7 @@ jobs:
           sudo chown -R root:root /srv/portico-infinity
           sudo chmod -R go-w /srv/portico-infinity
           # This proof directory is the ONLY /opt resource created for this E2E.
-          sudo install -d -o root -g root -m 0755 "/opt/infinity-e2e-${INFINITY_RUN_ID}"
+          sudo install -d -o portico-infinity-exec -g portico-infinity-exec -m 0755 "/opt/infinity-e2e-${INFINITY_RUN_ID}"
           cd /srv/portico-infinity
           sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
           if sudo -u portico-infinity-exec test -w /srv/portico-infinity; then
