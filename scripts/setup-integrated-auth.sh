@@ -332,6 +332,10 @@ else
   fi
 
   if [ -z "$TRAEFIK_ID" ]; then
+    if [ "$AUTH_PROJECT_NAME" = "portico-infinity" ]; then
+      echo 'INFINITY AUTH DENIED: no reusable Traefik on the selected edge. Configure an external edge/tunnel; bundled proxy is intentionally disabled.' >&2
+      exit 2
+    fi
     if ss -ltnH | awk '{print $4}' | grep -Eq '(^|:)(80|443)$'; then
       echo "$(vps_agent_text 'ERROR: no reusable Traefik was found, but host ports 80/443 are already in use.' 'ERRO: nenhum Traefik reutilizável foi encontrado, mas as portas 80/443 já estão em uso.')" >&2
       echo "$(vps_agent_text 'The installer will not replace an unknown web server.' 'O instalador não substituirá um servidor web desconhecido.')" >&2
