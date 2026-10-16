@@ -330,6 +330,7 @@ if [ "$INFINITY_OPT" -eq 1 ]; then
       echo "INFINITY DENIED: production checkout must be /srv/portico-infinity" >&2
       exit 2
     fi
+    python3 scripts/check-infinity-layout.py --run-as "$RUN_AS"
     if [ "$(id -u)" -ne 0 ] || [ "$owner_uid" -ne 0 ]; then
       echo "INFINITY DENIED: run installer as root from a root-owned controller checkout" >&2
       exit 2
