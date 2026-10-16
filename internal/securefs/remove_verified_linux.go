@@ -132,7 +132,7 @@ func verifiedRemoveEntry(parentFD int, name, canonical string, check func(string
 			for _, entry := range entries {
 				childPath := filepath.Join(canonical, entry.Name())
 				if err := verifiedRemoveEntry(childFD, entry.Name(), childPath, check, removed, depth+1); err != nil {
-					child.Close()
+					_ = child.Close() // cleanup after prior failure; error is already returned
 					return err
 				}
 			}
