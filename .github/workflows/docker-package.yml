@@ -343,9 +343,39 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/mcp-call compose.validate '{"project_dir":"/tmp/vps-agent-docker-proof/compose"}' | tee evidence/compose-validate.json
-          /tmp/mcp-call compose.up '{"project_dir":"/tmp/vps-agent-docker-proof/compose"}' | tee evidence/compose-up.json
+          /tmp/mcp-call compose.up '{"project_dir":"/tmp/vps-agent-docker-proof/compose","operation_id":"ci-compose-up-1"}' | tee evidence/compose-up.json
+          UP_JOB="$(python3 -c 'import json; print(json.load(open("evidence/compose-up.json"))["structured_content"]["job_id"])')"
+          test -n "$UP_JOB"
+          DONE=0
+          for _ in $(seq 1 120); do
+            /tmp/mcp-call job.status "{\"job_id\":\"$UP_JOB\"}" > evidence/compose-up-status.json
+            STATE="$(python3 -c 'import json; print(json.load(open("evidence/compose-up-status.json"))["structured_content"]["State"])')"
+            if [ "$STATE" = done ]; then DONE=1; break; fi
+            if [ "$STATE" = failed ] || [ "$STATE" = cancelled ]; then
+              cat evidence/compose-up-status.json >&2
+              /tmp/mcp-call job.tail "{\"job_id\":\"$UP_JOB\",\"lines\":100}" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$DONE" -eq 1
           test "$(docker inspect -f '{{.State.Running}}' vps-agent-compose-proof)" = "true"
-          /tmp/mcp-call compose.down '{"project_dir":"/tmp/vps-agent-docker-proof/compose"}' | tee evidence/compose-down.json
+          /tmp/mcp-call compose.down '{"project_dir":"/tmp/vps-agent-docker-proof/compose","operation_id":"ci-compose-down-1"}' | tee evidence/compose-down.json
+          DOWN_JOB="$(python3 -c 'import json; print(json.load(open("evidence/compose-down.json"))["structured_content"]["job_id"])')"
+          test -n "$DOWN_JOB"
+          DONE=0
+          for _ in $(seq 1 120); do
+            /tmp/mcp-call job.status "{\"job_id\":\"$DOWN_JOB\"}" > evidence/compose-down-status.json
+            STATE="$(python3 -c 'import json; print(json.load(open("evidence/compose-down-status.json"))["structured_content"]["State"])')"
+            if [ "$STATE" = done ]; then DONE=1; break; fi
+            if [ "$STATE" = failed ] || [ "$STATE" = cancelled ]; then
+              cat evidence/compose-down-status.json >&2
+              /tmp/mcp-call job.tail "{\"job_id\":\"$DOWN_JOB\",\"lines\":100}" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$DONE" -eq 1
           ! docker inspect vps-agent-compose-proof >/dev/null 2>&1
 
       - name: Diagnostics and inventory
