@@ -65,7 +65,7 @@ class InfinityLocalBootstrapTest(unittest.TestCase):
             '#!/bin/sh\n'
             'case "$1" in\n'
             '  -un) echo infinity-test;;\n'
-            '  -u) if [ "$#" -eq 1 ]; then echo 1001; else echo 1001; fi;;\n'
+            '  -u) if [ "$#" -eq 1 ]; then echo 1001; else echo 51321; fi;;\n'
             '  -gn) echo infinity-test;;\n'
             '  *) exit 1;;\n'
             'esac\n', encoding="utf-8"
