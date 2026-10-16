@@ -660,6 +660,9 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 		if req.InvocationID == "" {
 			return deny(req.ID, "invocation_required", "compose mutation requires invocation id")
 		}
+		if starter, ok := b.Docker.(composeAsyncStarter); ok && b.Jobs != nil {
+			return b.composeMutationAsync(ctx, req, action, starter)
+		}
 		return b.composeMutation(ctx, req, action)
 	case "shell.exec", "job.start":
 		if req.InvocationID == "" {
@@ -669,6 +672,19 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 	case "job.status":
 		if b.Jobs == nil {
 			return deny(req.ID, "jobs_unavailable", "job manager is not configured")
+		}
+		if b.State != nil {
+			stored, getErr := b.State.GetJob(ctx, req.Resource)
+			if getErr == nil && strings.HasPrefix(stored.Tool, "compose.") {
+				if stored.Subject != req.Subject {
+					return deny(req.ID, "job_error", "job belongs to another subject")
+				}
+				rec, statusErr := b.composeJobStatus(ctx, stored)
+				if statusErr != nil {
+					return deny(req.ID, "reconcile_required", statusErr.Error())
+				}
+				return ok(req.ID, rec)
+			}
 		}
 		rec, err := b.Jobs.Status(ctx, req.Subject, req.Resource)
 		if err != nil {
@@ -704,6 +720,21 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 	case "job.cancel":
 		if b.Jobs == nil {
 			return deny(req.ID, "jobs_unavailable", "job manager is not configured")
+		}
+		if b.State != nil {
+			stored, lookupErr := b.State.GetJob(ctx, req.Resource)
+			if lookupErr == nil && strings.HasPrefix(stored.Tool, "compose.") {
+				if stored.Subject != req.Subject {
+					return deny(req.ID, "job_error", "job belongs to another subject")
+				}
+				current, statusErr := b.composeJobStatus(ctx, stored)
+				if statusErr != nil {
+					return deny(req.ID, "reconcile_required", statusErr.Error())
+				}
+				if current.State == "done" || current.State == "failed" || current.State == "cancelled" {
+					return deny(req.ID, "job_already_terminal", "Compose job has already reached a terminal state")
+				}
+			}
 		}
 		if err := b.Jobs.Cancel(ctx, req.Subject, req.Resource); err != nil {
 			return deny(req.ID, "job_error", err.Error())

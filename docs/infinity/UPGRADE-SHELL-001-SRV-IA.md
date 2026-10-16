@@ -11,7 +11,7 @@
 
 ## Fronteira de autorização
 
-A IA tem leitura/escrita estática em `/opt`, e **não tem autoridade sobre** `/srv/portico-infinity`, Docker global, shell administrativo nem `sudo`. **Nunca** autorizar um script executado a partir de `/opt` a atualizar o controlador protegido. Essa separação é intencional. A execução a seguir é exclusivamente uma tarefa do operador autenticado no console/SSH. Não modificar Pórtico Community na VPS `srv678294`.
+A IA tem leitura/escrita estática em `/opt`, e **não tem autoridade sobre** `/srv/portico-infinity`, Docker global, shell administrativo nem `sudo`. **Nunca** autorizar um script executado a partir de `/opt` a atualizar o controlador protegido. Essa separação é intencional. A execução a seguir é exclusivamente uma tarefa do operador autenticado no console/SSH. Não modificar Pórtico Community na VPS de produção (host separado do SRV-IA).
 
 ## Pré-checagem obrigatória pelo operador, no terminal do SRV-IA
 
