@@ -196,3 +196,38 @@ func TestComposeAsyncJobConflictDoesNotStartWork(t *testing.T) {
 		t.Fatalf("operation ID allowed conflicting action: %+v", resp)
 	}
 }
+
+
+func TestComposeFinishedJobCannotBeCancelledAfterCompletion(t *testing.T) {
+	b, _, store, root := testBroker(t)
+	b.Jobs = &jobs.Manager{State: store}
+	starter := &fakeComposeAsyncStarter{}
+	req := wire.Request{ID: "create", Subject: "alice", Tool: "compose.pull",
+		Resource: root, InvocationID: "terminal-compose-job"}
+	resp := b.composeMutationAsync(context.Background(), req, "pull", starter)
+	if !resp.OK {
+		t.Fatalf("failed to queue Compose test job: %+v", resp)
+	}
+	var queued map[string]any
+	if err := json.Unmarshal(resp.Result, &queued); err != nil {
+		t.Fatal(err)
+	}
+	id := queued["job_id"].(string)
+	exit := 0
+	if err := store.UpdateJobState(context.Background(), id, "done", "", &exit); err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range []string{"alice", "bob"} {
+		result := b.Handle(context.Background(), wire.Request{
+			ID: "late-cancel-" + subject, Subject: subject,
+			Tool: "job.cancel", Resource: id, InvocationID: "late-cancel-" + subject,
+		})
+		if result.OK {
+			t.Fatalf("%s changed terminal job state: %+v", subject, result)
+		}
+	}
+	record, err := store.GetJob(context.Background(), id)
+	if err != nil || record.State != "done" {
+		t.Fatalf("late cancellation modified persisted result: %+v error=%v", record, err)
+	}
+}
