@@ -214,7 +214,9 @@ func (b *Broker) composeMutationAsync(ctx context.Context, req wire.Request, act
 	if err := starter.StartComposeJob(ctx, req.Resource, action, jobID); err != nil {
 		// Starting may have reached systemd before its acknowledgement failed.
 		// Keep the operation journal pending and refuse automatic re-execution.
-		_ = b.State.UpdateJobState(context.Background(), jobID, "failed", "dispatch acknowledgement uncertain", nil)
+		// Keep the job pending: systemd may have accepted the unit even if its
+		// acknowledgement was lost. A different operation ID must stay blocked.
+		_ = b.State.UpdateJobState(context.Background(), jobID, "starting", "dispatch acknowledgement uncertain", nil)
 		return deny(req.ID, "reconcile_required", "Compose dispatch failed or uncertain: "+err.Error())
 	}
 	if err := b.State.UpdateJobState(ctx, jobID, "running", "", nil); err != nil {
