@@ -8,26 +8,27 @@ import (
 )
 
 func TestInfinityProtectedControlPlane(t *testing.T) {
-    t.Setenv("VPS_AGENT_INFINITY_PROTECTED_ROOT", "/opt/portico-infinity")
+    t.Setenv("VPS_AGENT_INFINITY_PROTECTED_ROOT", "/srv/portico-infinity")
     cases := []struct {
         name, tool, resource, destination string
         blocked bool
     }{
-        {"write own policy", "file.write", "/opt/portico-infinity/config/policy.yaml", "", true},
-        {"patch own compose", "file.patch", "/opt/portico-infinity/compose.yaml", "", true},
-        {"chmod own directory", "file.chmod", "/opt/portico-infinity", "", true},
-        {"chown ancestor", "file.chown", "/opt", "", true},
-        {"remove ancestor", "file.remove", "/opt", "", true},
-        {"move own directory", "file.move", "/opt/portico-infinity", "/opt/elsewhere", true},
-        {"move unrelated to own directory", "file.move", "/opt/newproject", "/opt/portico-infinity", true},
-        {"copy into control plane", "file.copy", "/opt/src", "/opt/portico-infinity/file", true},
-        {"copy to ancestor", "file.copy", "/opt/src", "/opt", true},
+        {"write own policy", "file.write", "/srv/portico-infinity/config/policy.yaml", "", true},
+        {"patch own compose", "file.patch", "/srv/portico-infinity/compose.yaml", "", true},
+        {"chmod own directory", "file.chmod", "/srv/portico-infinity", "", true},
+        {"chown ancestor", "file.chown", "/srv", "", true},
+        {"remove ancestor", "file.remove", "/srv", "", true},
+        {"move own directory", "file.move", "/srv/portico-infinity", "/opt/elsewhere", true},
+        {"move unrelated to own directory", "file.move", "/opt/newproject", "/srv/portico-infinity", true},
+        {"copy into control plane", "file.copy", "/opt/src", "/srv/portico-infinity/file", true},
+        {"copy to ancestor", "file.copy", "/opt/src", "/srv", true},
         {"unrelated write", "file.write", "/opt/newproject/src/code.go", "", false},
         {"unrelated chmod", "file.chmod", "/opt/newproject", "", false},
         {"create project", "file.mkdir", "/opt/newproject", "", false},
+        {"opt ancestor not control plane", "file.chmod", "/opt", "", false},
         {"copy unrelated", "file.copy", "/opt/a", "/opt/newproject/b", false},
-        {"prefix confusion", "file.write", "/opt/portico-infinity-elsewhere/file", "", false},
-        {"normalize traversal", "file.write", "/opt/newproject/../portico-infinity/file", "", true},
+        {"prefix confusion", "file.write", "/srv/portico-infinity-elsewhere/file", "", false},
+        {"normalize traversal", "file.write", "/srv/newproject/../portico-infinity/file", "", true},
         {"relative path", "file.write", "portico-infinity/file", "", true},
     }
     for _, tc := range cases {
@@ -45,7 +46,7 @@ func TestInfinityProtectedControlPlane(t *testing.T) {
 }
 
 func TestInfinityControlPlaneInvalidSettingsFailClosed(t *testing.T) {
-    for _, root := range []string{"/", "/opt", "opt/portico-infinity", "/etc", "/opt/../etc"} {
+    for _, root := range []string{"/", "/opt", "/opt/portico-infinity", "srv/portico-infinity", "/etc", "/srv/../opt"} {
         t.Run(root, func(t *testing.T) {
             t.Setenv("VPS_AGENT_INFINITY_PROTECTED_ROOT", root)
             req := wire.Request{ID: "test", Tool: "file.write", Resource: "/opt/anything"}
@@ -58,7 +59,7 @@ func TestInfinityControlPlaneInvalidSettingsFailClosed(t *testing.T) {
 
 func TestInfinityControlPlaneGuardNotForcedOnCommunity(t *testing.T) {
     t.Setenv("VPS_AGENT_INFINITY_PROTECTED_ROOT", "")
-    req := wire.Request{ID: "test", Tool: "file.write", Resource: "/opt/portico-infinity/config/policy.yaml"}
+    req := wire.Request{ID: "test", Tool: "file.write", Resource: "/srv/portico-infinity/config/policy.yaml"}
     if guardInfinityControlPath(req) != nil {
         t.Fatal("legacy behavior was changed")
     }
