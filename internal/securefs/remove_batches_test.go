@@ -102,3 +102,39 @@ func TestRecursiveRemoveMoreThanFiftyThousandEntries(t *testing.T) {
 		t.Fatalf("large tree still exists after successful return: %v", err)
 	}
 }
+
+func TestRecursiveRemoveRejectsFileReplacementDuringAuthorization(t *testing.T) {
+	base := t.TempDir()
+	m, err := New([]string{base}, []string{base}, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "project")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(target, "victim.txt")
+	if err := os.WriteFile(victim, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(base, "replacement.tmp")
+	if err := os.WriteFile(replacement, []byte("new version"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	replaced := false
+	err = m.RemoveWithEntryGuard(target, true, func(path string, info os.FileInfo) error {
+		if path == victim {
+			replaced = true
+			if err := os.Rename(replacement, victim); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if !replaced || err == nil || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("changed inode was deleted without detection: replaced=%v err=%v", replaced, err)
+	}
+	if data, err := os.ReadFile(victim); err != nil || string(data) != "new version" {
+		t.Fatalf("replacement inode should remain intact: %q %v", data, err)
+	}
+}
