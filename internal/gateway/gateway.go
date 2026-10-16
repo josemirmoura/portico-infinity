@@ -633,7 +633,7 @@ func newMCPServer(exec Executor, metrics *runtimeMetrics) *mcp.Server {
 
 	for _, action := range []string{"pull", "up", "down"} {
 		action := action
-		mcp.AddTool(server, annotatedTool("compose."+action, "Perform the typed Docker Compose "+action+" action when policy permits it."),
+		mcp.AddTool(server, annotatedTool("compose."+action, "Queue the typed Docker Compose "+action+" action when policy permits it. Returns job_id; use job.status and job.tail until completion."),
 			func(ctx context.Context, _ *mcp.CallToolRequest, in composeInput) (*mcp.CallToolResult, map[string]any, error) {
 				var out map[string]any
 				if err := s.call(ctx, "compose."+action, in.ProjectDir, action, nil, &out, true, in.OperationID); err != nil {
