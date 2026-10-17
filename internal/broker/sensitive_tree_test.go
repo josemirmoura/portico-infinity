@@ -3,6 +3,8 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/sensitive"
 	"os"
 	"path/filepath"
 	"testing"
@@ -88,6 +90,15 @@ func TestRecursiveTreePreflightIgnoresProtectedSibling(t *testing.T) {
 	secret := filepath.Join(sibling, ".env")
 	if err := os.WriteFile(secret, []byte("secret in unrelated project"), 0600); err != nil {
 		t.Fatal(err)
+	}
+	// Simulate a huge sibling workspace: these entries must not count toward
+	// the preflight scan limit of a small unrelated target. Directory entries
+	// are cheap enough for a unit test and exercise the original regression.
+	for i := 0; i < sensitive.DefaultScanLimit+1; i++ {
+		name := filepath.Join(sibling, fmt.Sprintf("entry-%05d", i))
+		if err := os.Symlink("nonexistent", name); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := b.requireSensitiveSubtreeWork(ctx, "alice", project, []string{root}); err != nil {
 		t.Fatalf("unrelated sibling blocked scoped preflight: %v", err)
