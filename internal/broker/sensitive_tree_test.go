@@ -89,17 +89,11 @@ func TestRecursiveTreePreflightIgnoresProtectedSibling(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("secret in unrelated project"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	args, _ := json.Marshal(map[string]any{"recursive": true})
-	result := b.Handle(ctx, wire.Request{
-		ID: "scoped-tree-remove", Subject: "alice",
-		Tool: "file.remove", Resource: project,
-		InvocationID: "scoped-tree-remove-1", Args: args,
-	})
-	if !result.OK {
-		t.Fatalf("unrelated sibling blocked tree operation: %+v", result)
+	if err := b.requireSensitiveSubtreeWork(ctx, "alice", project, []string{root}); err != nil {
+		t.Fatalf("unrelated sibling blocked scoped preflight: %v", err)
 	}
-	if _, err := os.Stat(project); !os.IsNotExist(err) {
-		t.Fatalf("target should be removed, stat error=%v", err)
+	if _, err := os.Stat(project); err != nil {
+		t.Fatalf("preflight modified target: %v", err)
 	}
 	if _, err := os.Stat(secret); err != nil {
 		t.Fatalf("protected sibling was affected: %v", err)
