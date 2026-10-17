@@ -3,6 +3,8 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/sensitive"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,5 +71,63 @@ func TestProtectedFileBlocksDirectoryMove(t *testing.T) {
 	}
 	if _, err := os.Stat(protected); err != nil {
 		t.Fatalf("protected file changed after denied directory move: %v", err)
+	}
+}
+
+
+func TestRecursiveTreePreflightIgnoresProtectedSibling(t *testing.T) {
+	ctx := context.Background()
+	b, root, store := sensitiveTestBroker(t)
+	defer store.Close()
+	project := filepath.Join(root, "remove-me")
+	sibling := filepath.Join(root, "unrelated")
+	if err := os.MkdirAll(project, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sibling, 0750); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(sibling, ".env")
+	if err := os.WriteFile(secret, []byte("secret in unrelated project"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a huge sibling workspace: these entries must not count toward
+	// the preflight scan limit of a small unrelated target. Directory entries
+	// are cheap enough for a unit test and exercise the original regression.
+	for i := 0; i < sensitive.DefaultScanLimit+1; i++ {
+		name := filepath.Join(sibling, fmt.Sprintf("entry-%05d", i))
+		if err := os.Symlink("nonexistent", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.requireSensitiveSubtreeWork(ctx, "alice", project, []string{root}); err != nil {
+		t.Fatalf("unrelated sibling blocked scoped preflight: %v", err)
+	}
+	if _, err := os.Stat(project); err != nil {
+		t.Fatalf("preflight modified target: %v", err)
+	}
+	if _, err := os.Stat(secret); err != nil {
+		t.Fatalf("protected sibling was affected: %v", err)
+	}
+}
+
+func TestSensitiveTreePreflightRejectsTargetSymlink(t *testing.T) {
+	ctx := context.Background()
+	b, root, store := sensitiveTestBroker(t)
+	defer store.Close()
+	project := filepath.Join(root, "real")
+	alias := filepath.Join(root, "alias")
+	if err := os.MkdirAll(project, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(project, alias); err != nil {
+		t.Fatal(err)
+	}
+	err := b.requireSensitiveSubtreeWork(ctx, "alice", alias, []string{root})
+	if err == nil {
+		t.Fatal("preflight must reject symlink target")
+	}
+	if _, err := os.Stat(project); err != nil {
+		t.Fatal(err)
 	}
 }
