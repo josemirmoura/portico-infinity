@@ -519,32 +519,138 @@ func (m *Manager) Move(src, dst string) error {
 	return m.Remove(src, false)
 }
 
-func removeTree(root *os.Root, rel string) error {
+// removeTree streams bounded batches instead of loading every entry into
+// memory. Each batch reopens the directory from the beginning: removing names
+// while retaining a getdents cursor can otherwise skip entries. The inode is
+// rechecked between batches to fail closed if the target directory is swapped.
+//
+// This operation is NOT atomic. If an external process changes the tree during
+// deletion, it may fail after some items have been removed. The caller must
+// report an uncertain/partial outcome rather than claim rollback.
+func removeTree(root *os.Root, rel string, baseFD int, canonicalRoot string, guard func(string, os.FileInfo) error) error {
+	if err := ensureNoMountCross(baseFD, rel); err != nil {
+		return fmt.Errorf("unsafe recursive removal target: %w", err)
+	}
 	info, err := root.Lstat(rel)
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return root.Remove(rel)
-	}
-	f, err := root.Open(rel)
-	if err != nil {
-		return err
-	}
-	entries, err := f.Readdir(-1)
-	_ = f.Close()
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if err := removeTree(root, filepath.Join(rel, entry.Name())); err != nil {
-			return err
+	if guard != nil {
+		if err := guard(filepath.Join(canonicalRoot, rel), info); err != nil {
+			return fmt.Errorf("recursive removal entry is protected: %w", err)
 		}
 	}
-	return root.Remove(rel)
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		// A race may replace a checked entry with another inode. A mismatch
+		// must never silently authorize deletion of the replacement.
+		verified, err := root.Lstat(rel)
+		if err != nil {
+			return err
+		}
+		firstID, firstOK := info.Sys().(*syscall.Stat_t)
+		lastID, lastOK := verified.Sys().(*syscall.Stat_t)
+		if !firstOK || !lastOK || firstID.Dev != lastID.Dev ||
+			firstID.Ino != lastID.Ino || info.Mode().Type() != verified.Mode().Type() {
+			return fmt.Errorf("entry identity changed before recursive deletion: %s", rel)
+		}
+		return root.Remove(rel)
+	}
+	initial, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("cannot verify directory inode before recursive removal")
+	}
+	// Directory cursors may skip entries if those entries are removed while
+	// enumerating. Sweep a directory with bounded 256-name batches and repeat
+	// only if entries remain. Unlike reopening per batch, this avoids quadratic
+	// scans when deleting model/dataset directories with >50,000 files.
+	for {
+		if err := ensureRemoveDirectoryIdentity(root, rel, baseFD, initial); err != nil {
+			return err
+		}
+		dir, err := root.Open(rel)
+		if err != nil {
+			return err
+		}
+		opened, statErr := dir.Stat()
+		if statErr != nil {
+			_ = dir.Close()
+			return statErr
+		}
+		openedID, ok := opened.Sys().(*syscall.Stat_t)
+		if !ok || !opened.IsDir() || openedID.Dev != initial.Dev || openedID.Ino != initial.Ino {
+			_ = dir.Close()
+			return fmt.Errorf("directory identity changed while opening: %s", rel)
+		}
+		removed := 0
+		for {
+			names, readErr := dir.Readdirnames(256)
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				_ = dir.Close()
+				return readErr
+			}
+			if len(names) == 0 {
+				if !errors.Is(readErr, io.EOF) {
+					_ = dir.Close()
+					return fmt.Errorf("directory enumeration made no progress: %s", rel)
+				}
+				break
+			}
+			if err := ensureRemoveDirectoryIdentity(root, rel, baseFD, initial); err != nil {
+				_ = dir.Close()
+				return err
+			}
+			for _, name := range names {
+				child := filepath.Join(rel, name)
+				if err := removeTree(root, child, baseFD, canonicalRoot, guard); err != nil {
+					_ = dir.Close()
+					return fmt.Errorf("recursive removal may be partial at %s: %w", child, err)
+				}
+				removed++
+			}
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+		}
+		if err := dir.Close(); err != nil {
+			return err
+		}
+		if removed == 0 {
+			if err := ensureRemoveDirectoryIdentity(root, rel, baseFD, initial); err != nil {
+				return err
+			}
+			// ENOTEMPTY means a concurrent writer inserted a new entry. Fail
+			// explicitly and leave the operation journal unreconciled.
+			return root.Remove(rel)
+		}
+	}
+}
+
+func ensureRemoveDirectoryIdentity(root *os.Root, rel string, baseFD int, expected *syscall.Stat_t) error {
+	if err := ensureNoMountCross(baseFD, rel); err != nil {
+		return fmt.Errorf("mount boundary changed during removal of %s: %w", rel, err)
+	}
+	now, err := root.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	actual, ok := now.Sys().(*syscall.Stat_t)
+	if !ok || !now.IsDir() || now.Mode()&os.ModeSymlink != 0 ||
+		actual.Dev != expected.Dev || actual.Ino != expected.Ino {
+		return fmt.Errorf("directory identity changed during recursive removal: %s", rel)
+	}
+	return nil
 }
 
 func (m *Manager) Remove(target string, recursive bool) error {
+	return m.RemoveWithEntryGuard(target, recursive, nil)
+}
+
+// RemoveWithEntryGuard rechecks each actual entry during recursive deletion,
+// after the earlier whole-subtree preflight. Broker callers must supply the
+// current sensitive-file authorization check to catch entries introduced
+// between the preflight and mutation. A guard error may follow earlier
+// deletions; caller must preserve an unresolved operation journal.
+func (m *Manager) RemoveWithEntryGuard(target string, recursive bool, guard func(string, os.FileInfo) error) error {
 	rootPath, rel, err := selectRoot(m.writeRoots, target)
 	if err != nil {
 		return err
@@ -565,7 +671,12 @@ func (m *Manager) Remove(target string, recursive bool) error {
 		return root.Remove(rel)
 	}
 	if recursive {
-		return removeTree(root, rel)
+		base, err := root.Open(".")
+		if err != nil {
+			return err
+		}
+		defer base.Close()
+		return removeTree(root, rel, int(base.Fd()), rootPath, guard)
 	}
 	return root.Remove(rel)
 }
