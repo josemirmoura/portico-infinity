@@ -452,7 +452,13 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 			return deny(req.ID, "permission_denied", action+" is disabled by policy")
 		}
 		return b.fileMutation(ctx, req, in, func() (any, error) {
-			err := fs.Remove(req.Resource, in.Recursive)
+			var entryGuard func(string, os.FileInfo) error
+			if in.Recursive {
+				entryGuard = func(path string, info os.FileInfo) error {
+					return b.authorizeSensitiveDeletionEntry(ctx, req.Subject, path, info)
+				}
+			}
+			err := fs.RemoveWithEntryGuard(req.Resource, in.Recursive, entryGuard)
 			return map[string]any{"path": req.Resource, "removed": err == nil, "recursive": in.Recursive}, err
 		})
 	case "file.chmod":
@@ -1739,6 +1745,16 @@ func (b *Broker) fileMutation(ctx context.Context, req wire.Request, fingerprint
 	}
 	value, err := fn()
 	if err != nil {
+		// A recursive deletion may already have removed entries before failing.
+		// Keep the journal pending, requiring reconciliation before any retry.
+		var removeArg struct {
+			Recursive bool `json:"recursive"`
+		}
+		if req.Tool == "file.remove" &&
+			json.Unmarshal(req.Args, &removeArg) == nil && removeArg.Recursive {
+			return deny(req.ID, "reconcile_required",
+				"recursive removal outcome may be partial; inspect and reconcile before retry: "+err.Error())
+		}
 		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
 		return deny(req.ID, "filesystem_error", err.Error())
 	}
