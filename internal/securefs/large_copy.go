@@ -67,7 +67,10 @@ func (m *Manager) CopyFileStream(
 	fd, err := unix.Openat2(srcRootFD, srcRel, &unix.OpenHow{Flags: flags, Resolve: resolve})
 	if err != nil { return "", fmt.Errorf("unsafe binary-copy source: %w", err) }
 	in := os.NewFile(uintptr(fd), src)
-	if in == nil { unix.Close(fd); return "", errors.New("cannot pin binary-copy source") }
+	if in == nil {
+		if closeErr := unix.Close(fd); closeErr != nil { return "", fmt.Errorf("cannot close unusable source FD: %w", closeErr) }
+		return "", errors.New("cannot pin binary-copy source")
+	}
 	defer in.Close()
 	before, err := in.Stat()
 	if err != nil { return "", err }
@@ -102,7 +105,10 @@ func (m *Manager) CopyFileStream(
 	outFD, err := unix.Openat(parentFD, tmpBase, unix.O_WRONLY|unix.O_CLOEXEC|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW, 0600)
 	if err != nil { return "", err }
 	out := os.NewFile(uintptr(outFD), tmpBase)
-	if out == nil { unix.Close(outFD); return "", errors.New("cannot open temporary binary-copy destination") }
+	if out == nil {
+		if closeErr := unix.Close(outFD); closeErr != nil { return "", fmt.Errorf("cannot close unusable destination FD: %w", closeErr) }
+		return "", errors.New("cannot open temporary binary-copy destination")
+	}
 	published := false
 	defer func() {
 		_ = out.Close()
