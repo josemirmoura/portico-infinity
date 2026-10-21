@@ -1,0 +1,28 @@
+name: Infinity Compose retention focused tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/collect-infinity-compose-units.py'
+      - 'tests/test_collect_infinity_compose_units.py'
+      - 'internal/broker/compose_jobs.go'
+      - '.github/workflows/infinity-compose-retention.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  operator-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate CLI module and focused tests
+        run: |
+          python3 -m py_compile scripts/collect-infinity-compose-units.py
+          python3 -m unittest -v discover -s tests -p test_collect_infinity_compose_units.py
+      - name: Verify protected Go Compose code compiles
+        run: |
+          grep -Fq -- '--property=TimeoutStartSec=7200' internal/broker/compose_jobs.go
+          ! grep -Fq -- '--property=RuntimeMaxSec=7200' internal/broker/compose_jobs.go
