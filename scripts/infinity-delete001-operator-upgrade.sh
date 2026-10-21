@@ -116,3 +116,29 @@ docker exec portico-infinity-broker-1 /usr/local/bin/vps-agent audit-status --so
 trap - ERR
 printf 'ATUALIZACAO_CONCLUIDA=%s\nBACKUP=%s\n' "$(git rev-parse HEAD)" "$BACKUP"
 "${COMPOSE[@]}" ps
+
+echo '=== PREPARANDO UNICO TESTE SINTETICO DE 50K+ ARQUIVOS ==='
+python3 - <<'PY'
+import os
+
+base = '/opt'
+target = os.path.join(base, 'portico-delete001-e2e-20261021')
+if os.path.islink(base) or not os.path.isdir(base):
+    raise SystemExit('ABORTAR: /opt invalido')
+if os.path.lexists(target):
+    raise SystemExit('AMOSTRA_NAO_CRIADA: pasta do teste ja existe, inspecionar antes de continuar')
+os.mkdir(target, 0o700)
+try:
+    for i in range(50033):
+        path = os.path.join(target, f'entry-{i:06d}')
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+except BaseException:
+    # A pasta foi criada exclusivamente por esta etapa e seus arquivos sao artificiais.
+    for entry in os.scandir(target):
+        if entry.is_file(follow_symlinks=False):
+            os.unlink(entry.path)
+    os.rmdir(target)
+    raise
+print('ARVORE_SINTETICA_PRONTA=', target, 'ARQUIVOS=50033')
+PY
