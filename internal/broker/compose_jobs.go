@@ -72,7 +72,7 @@ func (DockerCLI) StartComposeJob(ctx context.Context, dir, action, unit string) 
 		"--property=RemainAfterExit=yes",
 		"--property=NoNewPrivileges=yes",
 		"--property=UMask=0077",
-		"--property=RuntimeMaxSec=7200",
+		"--property=TimeoutStartSec=7200",
 		"--property=MemoryMax=1073741824",
 		"--property=TasksMax=128",
 		"--",
