@@ -83,13 +83,19 @@ func (m *Manager) CopyFileStream(
 		&unix.OpenHow{Flags: uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC), Resolve: resolve})
 	if err != nil { return "", fmt.Errorf("unsafe binary-copy destination parent: %w", err) }
 	defer unix.Close(parentFD)
-	root, err := openRootNoSymlink(m.physical(dstRootPath))
-	if err != nil { return "", err }
-	defer root.Close()
-	uid, gid, err := atomicWriteOwner(root, dir, dstRel)
-	if err != nil { return "", err }
-
+	// A large copy is intentionally create-only: never replace an existing
+	// model/checkpoint. In particular, do not clobber a concurrent writer.
 	base := filepath.Base(dstRel)
+	var existing unix.Stat_t
+	if err := unix.Fstatat(parentFD, base, &existing, unix.AT_SYMLINK_NOFOLLOW); err == nil {
+		return "", errors.New("binary-copy destination already exists")
+	} else if !errors.Is(err, unix.ENOENT) {
+		return "", fmt.Errorf("cannot verify binary-copy destination: %w", err)
+	}
+	var parentStat unix.Stat_t
+	if err := unix.Fstat(parentFD, &parentStat); err != nil { return "", err }
+	uid, gid := int(parentStat.Uid), int(parentStat.Gid)
+
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil { return "", err }
 	tmpBase := "." + base + ".binary-copy-" + hex.EncodeToString(nonce[:])
@@ -138,7 +144,7 @@ func (m *Manager) CopyFileStream(
 	if err := out.Sync(); err != nil { return "", err }
 	if err := out.Close(); err != nil { return "", err }
 	// Both paths are within the same pinned parent directory descriptor.
-	if err := unix.Renameat(parentFD, tmpBase, parentFD, base); err != nil { return "", err }
+	if err := unix.Renameat2(parentFD, tmpBase, parentFD, base, unix.RENAME_NOREPLACE); err != nil { return "", err }
 	published = true
 	// Persist the destination directory rename before reporting success.
 	if err := unix.Fsync(parentFD); err != nil {
