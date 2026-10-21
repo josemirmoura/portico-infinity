@@ -411,7 +411,7 @@ jobs:
           git push /tmp/vps-agent-update-origin.git HEAD:refs/heads/base
           git --git-dir=/tmp/vps-agent-update-origin.git symbolic-ref HEAD refs/heads/base
 
-          git clone /tmp/vps-agent-update-origin.git /tmp/vps-agent-update-work
+          git clone --no-hardlinks /tmp/vps-agent-update-origin.git /tmp/vps-agent-update-work
           git -C /tmp/vps-agent-update-work config user.email "acceptance@example.invalid"
           git -C /tmp/vps-agent-update-work config user.name "VPS Agent Acceptance"
           git -C /tmp/vps-agent-update-work checkout -b update-target
