@@ -18,7 +18,7 @@ on_failure() {
   if (( maint_started )); then
     echo 'Tentando restaurar APENAS Broker e Gateway ao SHA anterior...'
     git switch --detach "$OLD"
-    "\${COMPOSE[@]}" up -d --build --no-deps --force-recreate broker gateway
+    "${COMPOSE[@]}" up -d --build --no-deps --force-recreate broker gateway
     echo 'Conferir health/auditoria e, se necessario, restaurar o backup consistente pelo console.'
   fi
   exit "$rc"
@@ -33,15 +33,15 @@ test -z "$(git status --porcelain --untracked-files=no)"
 test ! -L "$BASE"
 test "$(stat -c '%u:%g' "$BASE")" = '0:0'
 python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-"\${COMPOSE[@]}" config --quiet
+"${COMPOSE[@]}" config --quiet
 for svc in broker gateway; do
-  ctr="portico-infinity-\${svc}-1"
+  ctr="portico-infinity-${svc}-1"
   files=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$ctr")
   test "$files" = "$BASE/compose.yaml,$BASE/compose.infinity-auth.remote.yaml"
   test "$(docker inspect -f '{{.State.Health.Status}}' "$ctr")" = healthy
 done
 for svc in zitadel-login zitadel-api zitadel-postgres; do
-  test "$(docker inspect -f '{{.State.Health.Status}}' "portico-infinity-\${svc}-1")" = healthy
+  test "$(docker inspect -f '{{.State.Health.Status}}' "portico-infinity-${svc}-1")" = healthy
 done
 
 check_jobs() {
@@ -74,18 +74,18 @@ git diff --quiet "$OLD" "$TARGET" -- internal/state/
 mkdir -p -- "$BACKUP_BASE"
 test ! -L "$BACKUP_BASE"
 chmod 700 "$BACKUP_BASE"
-BACKUP="$BACKUP_BASE/delete001-$(date -u +%Y%m%dT%H%M%SZ)-\${OLD:0:12}"
+BACKUP="$BACKUP_BASE/delete001-$(date -u +%Y%m%dT%H%M%SZ)-${OLD:0:12}"
 mkdir -m 700 "$BACKUP"
 printf '%s\n' "$OLD" > "$BACKUP/previous-sha.txt"
 for svc in zitadel-login zitadel-api zitadel-postgres; do
-  docker inspect -f '{{.Id}}' "portico-infinity-\${svc}-1" > "$BACKUP/\${svc}-id.txt"
+  docker inspect -f '{{.Id}}' "portico-infinity-${svc}-1" > "$BACKUP/${svc}-id.txt"
 done
 
 echo '=== BACKUP CONSISTENTE: INTERROMPER APENAS BROKER/GATEWAY ==='
 maint_started=1
-"\${COMPOSE[@]}" stop gateway
+"${COMPOSE[@]}" stop gateway
 check_jobs
-"\${COMPOSE[@]}" stop broker
+"${COMPOSE[@]}" stop broker
 tar -C "$BASE" -czf "$BACKUP/runtime.tar.gz" \
   .env config state compose.yaml compose.infinity-auth.remote.yaml
 tar -tzf "$BACKUP/runtime.tar.gz" > /dev/null
@@ -96,8 +96,8 @@ echo '=== PROMOVER O COMMIT APROVADO ==='
 git switch --detach "$TARGET"
 test "$(git rev-parse HEAD)" = "$TARGET"
 python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-"\${COMPOSE[@]}" config --quiet
-"\${COMPOSE[@]}" up -d --build --no-deps --force-recreate broker gateway
+"${COMPOSE[@]}" config --quiet
+"${COMPOSE[@]}" up -d --build --no-deps --force-recreate broker gateway
 
 for i in $(seq 1 50); do
   if [[ $(docker inspect -f '{{.State.Health.Status}}' portico-infinity-broker-1 2>/dev/null || :) == healthy &&
@@ -107,12 +107,12 @@ for i in $(seq 1 50); do
   sleep 2
 done
 for svc in broker gateway zitadel-login zitadel-api zitadel-postgres; do
-  test "$(docker inspect -f '{{.State.Health.Status}}' "portico-infinity-\${svc}-1")" = healthy
+  test "$(docker inspect -f '{{.State.Health.Status}}' "portico-infinity-${svc}-1")" = healthy
 done
 for svc in zitadel-login zitadel-api zitadel-postgres; do
-  test "$(docker inspect -f '{{.Id}}' "portico-infinity-\${svc}-1")" = "$(cat "$BACKUP/\${svc}-id.txt")"
+  test "$(docker inspect -f '{{.Id}}' "portico-infinity-${svc}-1")" = "$(cat "$BACKUP/${svc}-id.txt")"
 done
 docker exec portico-infinity-broker-1 /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
 trap - ERR
 printf 'ATUALIZACAO_CONCLUIDA=%s\nBACKUP=%s\n' "$(git rev-parse HEAD)" "$BACKUP"
-"\${COMPOSE[@]}" ps
+"${COMPOSE[@]}" ps
