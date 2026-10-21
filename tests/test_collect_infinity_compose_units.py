@@ -19,7 +19,7 @@ class ComposeRetentionTests(unittest.TestCase):
         job = {
             "job_id": "vps-agent-compose-" + "a" * 32,
             "unit_name": "vps-agent-compose-" + "a" * 32 + ".service",
-            "tool": "compose.up", "state": "done",
+            "tool": "compose.up", "resource": "/opt/test", "state": "done",
             "exit_code": 0,
         }
         job.update(changes)
@@ -29,6 +29,7 @@ class ComposeRetentionTests(unittest.TestCase):
         unit = {
             "Id": "vps-agent-compose-" + "a" * 32 + ".service",
             "Description": ret.DESCRIPTION,
+            "WorkingDirectory": "/opt/test",
             "LoadState": "loaded",
             "ActiveState": "active", "SubState": "exited",
             "Result": "success", "ExecMainStatus": "0",
@@ -45,6 +46,7 @@ class ComposeRetentionTests(unittest.TestCase):
             (self.job(tool="shell.exec"), self.unit()),
             (self.job(exit_code=None), self.unit()),
             (self.job(), self.unit(Description="Different app")),
+            (self.job(), self.unit(WorkingDirectory="/opt/other-project")),
             (self.job(), self.unit(Transient="no")),
             (self.job(), self.unit(ActiveState="activating", SubState="start")),
             (self.job(), self.unit(ActiveState="active", SubState="running")),
@@ -77,7 +79,7 @@ class ComposeRetentionTests(unittest.TestCase):
             dbpath = Path(d) / "state.db"
             db = sqlite3.connect(dbpath)
             db.execute("""CREATE TABLE jobs (
-              job_id TEXT, tool TEXT, unit_name TEXT,
+              job_id TEXT, tool TEXT, resource TEXT, unit_name TEXT,
               state TEXT, exit_code INTEGER, updated_at INTEGER
             )""")
             now = time.time_ns()
@@ -89,8 +91,8 @@ class ComposeRetentionTests(unittest.TestCase):
                 ("old-shell", "shell.exec", "done", 0, now - 9 * one_day),
             ]
             db.executemany(
-                "INSERT INTO jobs VALUES (?,?,?,?,?,?)",
-                [(j, tool, j + ".service", state, ec, stamp)
+                "INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
+                [(j, tool, "/opt/test", j + ".service", state, ec, stamp)
                  for j, tool, state, ec, stamp in items],
             )
             db.commit()
