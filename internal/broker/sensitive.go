@@ -210,11 +210,19 @@ func (b *Broker) guardSensitiveRequest(ctx context.Context, req wire.Request) *w
 }
 
 func (b *Broker) sensitiveShellMasks(ctx context.Context, subject string, roots []string) ([]string, error) {
-	aliases, err := sensitive.ProtectedAliases(
-		os.Getenv("VPS_AGENT_HOST_ROOT"),
-		roots,
-		sensitive.DefaultScanLimit,
-	)
+	var aliases []string
+	var err error
+	if os.Getenv("VPS_AGENT_INFINITY_PROTECTED_ROOT") != "" {
+		// Infinity mounts only the selected workspace and must mask only
+		// secrets inside it. This scanner streams any number of ordinary
+		// entries, but fails closed on excessive sensitive masks.
+		aliases, err = sensitive.ProtectedAliasesStreaming(
+			os.Getenv("VPS_AGENT_HOST_ROOT"), roots)
+	} else {
+		// Preserve Community's existing bounded legacy behavior.
+		aliases, err = sensitive.ProtectedAliases(
+			os.Getenv("VPS_AGENT_HOST_ROOT"), roots, sensitive.DefaultScanLimit)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cannot safely prepare shell secret mask: %w", err)
 	}
