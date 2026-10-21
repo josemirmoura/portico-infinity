@@ -77,10 +77,10 @@ rollback(){
 }
 trap rollback ERR
 
-if grep -qE '^    - remove_recursive[[:space:]]*$' "$POLICY"; then
-  echo 'ACAO_JA_HABILITADA'
-else
-  python3 "$helper" --policy "$POLICY" --env "$ENVFILE" --apply --ack-opt-recursive
+old_hash=$(sha256sum "$POLICY" | cut -d' ' -f1)
+python3 "$helper" --policy "$POLICY" --env "$ENVFILE" --apply --ack-opt-recursive
+new_hash=$(sha256sum "$POLICY" | cut -d' ' -f1)
+if [[ "$old_hash" != "$new_hash" ]]; then
   changed=1
   python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
   "${COMPOSE[@]}" config --quiet
