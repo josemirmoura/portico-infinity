@@ -50,7 +50,7 @@ def parse_unit(raw: str) -> dict[str, str]:
 def unit_status(unit: str) -> dict[str, str]:
     return parse_unit(run(
         "systemctl", "show", unit, "--no-pager",
-        "--property=Id,Description,LoadState,ActiveState,SubState,Result,ExecMainStatus,Type,Transient",
+        "--property=Id,Description,WorkingDirectory,LoadState,ActiveState,SubState,Result,ExecMainStatus,Type,Transient",
     ))
 
 
@@ -67,6 +67,9 @@ def unit_is_owned_and_finished(job: dict, unit: dict[str, str]) -> bool:
     if unit.get("Id") != job["unit_name"] or unit.get("Description") != DESCRIPTION:
         return False
     if unit.get("Type") != "oneshot" or unit.get("Transient") != "yes":
+        return False
+    # The transient service must belong to the exact project persisted with the job.
+    if not job.get("resource") or unit.get("WorkingDirectory") != job["resource"]:
         return False
     active, sub = unit.get("ActiveState"), unit.get("SubState")
     if (active, sub) not in (("active", "exited"), ("failed", "failed"), ("inactive", "dead")):
@@ -123,7 +126,7 @@ def archive_job(path: Path, job: dict, unit: dict[str, str]) -> None:
         "updated_at_unix_ns": job["updated_at"],
         "archived_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "systemd": {k: unit.get(k, "") for k in (
-            "Id", "Description", "LoadState", "ActiveState", "SubState",
+            "Id", "Description", "WorkingDirectory", "LoadState", "ActiveState", "SubState",
             "Result", "ExecMainStatus", "Type", "Transient",
         )},
         "log_bytes": len(logs),
@@ -147,7 +150,7 @@ def candidates(db_path: Path, min_age_days: int, limit: int) -> list[dict]:
         db.execute("PRAGMA query_only=ON")
         db.row_factory = sqlite3.Row
         rows = db.execute("""
-            SELECT job_id, tool, unit_name, state, exit_code, updated_at
+            SELECT job_id, tool, resource, unit_name, state, exit_code, updated_at
             FROM jobs
             WHERE tool IN ('compose.pull', 'compose.up', 'compose.down')
               AND state IN ('done','failed') AND updated_at <= ?
