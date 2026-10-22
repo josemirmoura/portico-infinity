@@ -183,7 +183,9 @@ def main() -> int:
         for ident in jobs:
             try:
                 outcome = reconcile_job(STATE, ident)
-            except RevocationError:
+            except (RevocationError, OSError, ValueError):
+                # One corrupt job cannot prevent fencing/stopping the others.
+                # Its outcome is still NOT considered cancelled.
                 outcome = "uncertain"
             counts[outcome] += 1
         print("INFINITY FILECOPY FENCE PERSISTED: " + ("created" if created else "existing")
