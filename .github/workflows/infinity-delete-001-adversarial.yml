@@ -33,23 +33,8 @@ jobs:
       - name: Broker E2E: reject protected 50k tree without partial effects and delete clean tree
         run: |
           set -euo pipefail
-          go test -count=1 -timeout=10m -v ./internal/broker -run '^TestInfinityDelete001LargeTreeThroughBroker        run: |
-          set -euo pipefail
-          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/portico-delete-test" ./internal/securefs
-      - name: Inject bind mount after preflight inside disposable privileged container
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --privileged --read-only \
-            --tmpfs /tmp:rw,mode=1777 \
-            --mount "type=bind,source=$RUNNER_TEMP/portico-delete-test,target=/test,readonly" \
-            -e PORTICO_REQUIRE_MOUNT_TEST=1 \
-            ubuntu:24.04 /test \
-            -test.v -test.run '^TestRecursiveRemoveRejectsBindMount'
-      - name: Ensure tests did not modify checkout
-        run: |
-          set -euo pipefail
-          test -z "$(git status --porcelain)"
-
+          go test -count=1 -timeout=10m -v ./internal/broker \
+            -run '^TestInfinityDelete001LargeTreeThroughBroker$'
       - name: Build static adversarial test binary
         run: |
           set -euo pipefail
@@ -62,7 +47,7 @@ jobs:
             --mount "type=bind,source=$RUNNER_TEMP/portico-delete-test,target=/test,readonly" \
             -e PORTICO_REQUIRE_MOUNT_TEST=1 \
             ubuntu:24.04 /test \
-            -test.v -test.run '^TestRecursiveRemoveRejectsBindMount'
+            -test.v -test.run '^TestRecursiveRemoveRejectsBindMount$'
       - name: Ensure tests did not modify checkout
         run: |
           set -euo pipefail
