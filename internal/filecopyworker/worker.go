@@ -282,6 +282,12 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
         return "", openErr
     }
     if err := progressRoot.Close(); err != nil { return "", err }
+    revoked, checkErr := IsSubjectRevoked(dir, manifest.Subject)
+    if checkErr != nil { return "", fmt.Errorf("cannot verify filecopy revocation fence: %w", checkErr) }
+    if revoked {
+        if err := status(dir, id, "cancelled", 0, 0, ""); err != nil { return "", err }
+        return "", context.Canceled
+    }
     if err := status(dir, id, "running", 0, 0, ""); err != nil { return "", err }
     selected := manifest.selectedScope()
     fs, err := securefs.NewWithHostRoot([]string{selected}, []string{selected}, securefs.DefaultMaxBytes, hostRoot)
