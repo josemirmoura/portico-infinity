@@ -216,14 +216,15 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
     lastReport := time.Now()
     var progressErr error
     sha, copyErr := fs.CopyFileStream(ctx, manifest.Source, manifest.Destination,
-        manifest.MaxBytes, manifest.ExpectedSHA256, func(done, total int64) {
+        manifest.MaxBytes, manifest.ExpectedSHA256, func(done, total int64) error {
             lastDone, lastTotal = done, total
-            if progressErr != nil { return }
+            if progressErr != nil { return progressErr }
             if done-recorded < progressStep && time.Since(lastReport) < time.Second && done != total {
-                return
+                return nil
             }
             progressErr = status(dir, id, "running", done, total, "")
             if progressErr == nil { recorded, lastReport = done, time.Now() }
+            return progressErr
         })
     if progressErr != nil {
         // The destination may already have been atomically published.
@@ -233,6 +234,7 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
     if copyErr != nil {
         phase := "failed"
         if errors.Is(copyErr, context.Canceled) { phase = "cancelled" }
+        if errors.Is(copyErr, securefs.ErrCopyReconcile) { phase = "reconcile_required" }
         if err := status(dir, id, phase, lastDone, lastTotal, ""); err != nil {
             return "", fmt.Errorf("copy failed and final status could not be persisted: %w", err)
         }
