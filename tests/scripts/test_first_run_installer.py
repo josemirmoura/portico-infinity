@@ -183,12 +183,21 @@ esac
         self.assertIn("--ack-infinity-opt", proc.stderr)
         self.assert_no_scope_creation()
 
-    def test_infinity_refuses_non_opt_scope(self):
+    def test_infinity_refuses_create_scope_before_mutation(self):
         proc = self.run_installer("--profile", "project", "--scope", self.scope,
                                   "--infinity-opt", "--yes", "--ack-infinity-opt",
                                   "--run-as", "deploy", "--create-scope")
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
-        self.assertIn("/opt", proc.stderr)
+        self.assertIn("create-scope", proc.stderr)
+        self.assert_no_scope_creation()
+
+    def test_infinity_alternate_existing_scope_reaches_init_boundary(self):
+        proc = self.run_installer("--profile", "project", "--scope", "/mnt",
+                                  "--infinity-opt", "--yes", "--ack-infinity-opt",
+                                  "--run-as", "deploy")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("REACHED_INIT_ARGS", proc.stdout)
+        self.assertIn("autorização PERSISTENTE em /mnt", proc.stdout)
         self.assert_no_scope_creation()
 
     def test_infinity_refuses_preexisting_operator_secrets(self):

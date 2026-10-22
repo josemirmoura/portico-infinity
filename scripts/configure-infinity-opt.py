@@ -18,6 +18,11 @@ spec = importlib.util.spec_from_file_location("delegated_roots", delegate_file)
 delegate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(delegate)
 
+scope_module_file = Path(__file__).resolve().with_name("infinity-scope.py")
+scope_spec = importlib.util.spec_from_file_location("infinity_scope", scope_module_file)
+scope_module = importlib.util.module_from_spec(scope_spec)
+scope_spec.loader.exec_module(scope_module)
+
 FILE_ACTIONS = ("list", "stat", "read", "mkdir", "write", "patch", "copy", "move", "remove", "hash", "chmod", "chown")
 ROOT_KEYS = (("filesystem", "read"), ("filesystem", "write"), ("shell", "cwd_roots"))
 DENY_LISTS = (("services", "manage"), ("services", "actions"),
@@ -62,13 +67,17 @@ def configure(policy_path, env_path):
     if env_path.is_symlink() or not env_path.is_file():
         raise PolicyError("env must be an existing regular file")
     env = delegate.env_values(env_path)
-    if env.get("VPS_AGENT_SCOPE_ROOT") != "/opt" or env.get("VPS_AGENT_WHOLE_HOST") != "0":
-        raise PolicyError("physical scope must be exactly /opt, whole-host disabled")
+    if env.get("VPS_AGENT_WHOLE_HOST") != "0":
+        raise PolicyError("whole-host mode disabled in Infinity")
+    try:
+        scope = scope_module.validate_scope(env.get("VPS_AGENT_SCOPE_ROOT", ""))
+    except scope_module.ScopeError as exc:
+        raise PolicyError("unsafe Infinity scope: " + str(exc)) from exc
     text = policy_path.read_text(encoding="utf-8")
     lists = delegate.parse_lists(text)
     fields = scalars(text)
     for field in ROOT_KEYS:
-        if lists.get(field) != ["/opt"]:
+        if lists.get(field) != [scope]:
             raise PolicyError("unauthorized roots: " + ".".join(field))
     expected = {
         ("mode",): "scoped", ("features", "full_mode_enabled"): "false",
@@ -115,7 +124,7 @@ def main():
     except (PolicyError, OSError, ValueError) as exc:
         print("INFINITY OPT DENIED: " + str(exc), file=sys.stderr)
         return 2
-    print("INFINITY OPT: static /opt, typed chmod/chown, non-root shell; root and apt DISABLED")
+    print("INFINITY OPT: static " + scope_module.validate_scope(delegate.env_values(args.env)["VPS_AGENT_SCOPE_ROOT"]) + ", typed chmod/chown, non-root shell; root and apt DISABLED")
     return 0
 
 if __name__ == "__main__":

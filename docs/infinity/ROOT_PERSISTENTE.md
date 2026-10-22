@@ -6,6 +6,23 @@
 
 No laboratório SRV-IA, dar à IA acesso persistente, sem renovação temporal, para trabalhar em todos os projetos atuais e futuros em `/opt`, inclusive operações que requerem privilégios administrativos sobre arquivos. O proprietário aceita root global em último caso, mas prefere o limite real ao diretório `/opt` quando viável.
 
+## Teto selecionável para novas instalações (implementação em avaliação)
+
+O caminho padrão continua sendo `/opt`. Para um host Linux novo, o operador pode fornecer `--scope /mnt` (exemplo de diretório existente e protegido), que passa a ser o teto físico e a única raiz estática de leitura, escrita e shell não-root no perfil Infinity.
+
+A seleção é explícita, exige caminho absoluto canônico, ancestrais protegidos e ausência de links simbólicos, e recusa diretórios de sistema/identidade, incluindo `/srv`, `/etc`, `/usr`, `/var`, `/root` e `/home`. O plano de controle permanece em `/srv/portico-infinity`, fora do teto.
+
+Exemplo de prévia **apenas em laboratório descartável**, sem iniciar serviços:
+
+```bash
+bash scripts/install-infinity.sh --scope /mnt --local-only \
+  --run-as portico-infinity-exec --yes --ack-infinity-opt
+```
+
+A confirmação interativa, quando presente, inclui o diretório escolhido. Uma instalação existente não pode mudar de teto reaplicando o instalador; isso requer migração controlada própria.
+
+**Limitação a resolver antes da v1.0:** o worker independente de cópia binária grande ainda confina operações a `/opt` e sua unidade systemd usa `ReadWritePaths=/opt`. Portanto, o suporte a grandes cópias no teto alternativo depende de correção e testes próprios. A ativação de cópia durável continua opt-in do operador e desabilitada por padrão. Esta seção não constitui homologação de implantação nem UAT.
+
 ## Decisão de engenharia
 
 **Padrão Infinity: `opt-privileged`, sem shell root arbitrário. Instalação do controlador em `/srv/portico-infinity`.**

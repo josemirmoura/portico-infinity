@@ -45,7 +45,7 @@ Opções:
   --local-only              Para após a verificação local.
   --yes                     Aceita a autoridade exibida sem prompt.
   --ack-whole-host          Obrigatório com --yes em whole-host.
-  --infinity-opt            Perfil experimental de arquivos privilegiados somente em /opt.
+  --infinity-opt            Perfil Infinity privilegiado com teto escolhido (padrão /opt).
   --ack-infinity-opt        Aprovação obrigatória em modo --yes com Infinity.
   --remote-edge             Proxy HTTPS fica na VPS, ligado ao SRV-IA por WireGuard.
   --wg-bind-address IPv4    IPv4 da interface WireGuard local no SRV-IA.
@@ -74,7 +74,7 @@ Options:
   --local-only              Stop after local runtime verification.
   --yes                     Accept the displayed effective authority.
   --ack-whole-host          Required with --yes for whole-host.
-  --infinity-opt            Experimental privileged file operations only inside /opt.
+  --infinity-opt            Experimental privileged file operations in a validated chosen scope.
   --ack-infinity-opt        Required for non-interactive Infinity installation.
   --remote-edge             HTTPS edge proxy on separate VPS over WireGuard.
   --wg-bind-address IPv4    Local WireGuard interface IPv4 on SRV-IA.
@@ -291,18 +291,20 @@ fi
 
 # Fail closed before state changes, container start or directory creation.
 if [ "$INFINITY_OPT" -eq 1 ]; then
-  if [ "$PROFILE" != "project" ] || [ "$SCOPE" != "/opt" ] || [ "$ACK_WHOLE_HOST" -eq 1 ]; then
-    echo 'INFINITY DENIED: requires --profile project --scope /opt, not whole-host' >&2
+  if [ "$PROFILE" != "project" ] || [ "$ACK_WHOLE_HOST" -eq 1 ] || [ "$CREATE_SCOPE" -eq 1 ]; then
+    echo 'INFINITY DENIED: requires a project profile with an existing scoped directory; whole-host/create-scope not allowed' >&2
     exit 2
   fi
+  # Check before writing .env, policy, starting Docker, or creating any scope.
+  python3 scripts/infinity-scope.py --scope "$SCOPE" || exit 2
   if [ -e .env ] || [ -L .env ] || [ -e config/policy.yaml ] || [ -L config/policy.yaml ]; then
     echo 'INFINITY DENIED: fresh install required; existing operator state is protected' >&2
     exit 3
   fi
   printf '%s\n' \
-    '⚠️ PÓRTICO INFINITY: autorização PERSISTENTE em /opt, inclusive chmod/chown.' \
+    "⚠️ PÓRTICO INFINITY: autorização PERSISTENTE em $SCOPE, inclusive chmod/chown." \
     '⚠️ Não libera shell root, sudo apt, Docker irrestrito ou todo o host.' \
-    '⚠️ Arquivos em /opt executados por serviços privilegiados ainda oferecem risco indireto.'
+    "⚠️ Arquivos em $SCOPE executados por serviços privilegiados ainda oferecem risco indireto."
   if [ "$ASSUME_YES" -eq 1 ] && [ "$ACK_INFINITY_OPT" -ne 1 ]; then
     echo 'INFINITY DENIED: --yes requires --ack-infinity-opt' >&2
     exit 4
@@ -312,9 +314,9 @@ if [ "$INFINITY_OPT" -eq 1 ]; then
       echo 'INFINITY DENIED: interactive approval or --yes --ack-infinity-opt required' >&2
       exit 4
     fi
-    printf 'Digite/Type AUTORIZO INFINITY /opt para prosseguir: '
+    printf 'Digite/Type AUTORIZO INFINITY %s para prosseguir: ' "$SCOPE"
     read -r infinity_answer
-    if [ "$infinity_answer" != 'AUTORIZO INFINITY /opt' ]; then
+    if [ "$infinity_answer" != "AUTORIZO INFINITY $SCOPE" ]; then
       echo 'Infinity cancelado / cancelled' >&2
       exit 4
     fi
