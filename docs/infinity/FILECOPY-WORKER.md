@@ -2,6 +2,14 @@
 
 **Implementação inicial:** [Issue #8](https://github.com/josemirmoura/portico-infinity/issues/8). Esta documentação descreve o **executável interno e seus invariantes**; **não significa que haja uma ferramenta MCP disponível**.
 
+## Teto físico selecionado pelo operador (evolução v1.0)
+
+Para instalações novas com escopo privilegiado alternativo, o Broker deverá obter o teto físico exclusivamente de `VPS_AGENT_PHYSICAL_SCOPE_ROOT` (controlado pelo operador) e persistir o valor no manifesto root-only do job como `scope_root`. O trabalhador confere que origem e destino permanecem abaixo dele, e a unidade systemd confina `ReadWritePaths` ao **mesmo teto** e ao diretório de estado root-only. A compatibilidade com manifestos anteriores sem `scope_root` usa `/opt`, mantendo jobs legítimos anteriores interpretáveis sem ampliar permissões.
+
+Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/var` e `/root`), `.env*` e caminhos de origem/destino fora do teto são recusados. O valor do root jamais é fornecido como argumento MCP. O executável instalado no host continua sob decisão independente do operador, **desabilitado até habilitação explícita** e aceite operacional.
+
+**Escopo desta implementação:** validação e testes sintéticos do motor; ainda faltam E2E multigigabyte, reinício/retomada, revogação real e teste humano. `ReadWritePaths` e raiz lógica precisam ser revistos em CI antes de habilitar feature para usuários.
+
 ## Domínios de confiança
 
 | Camada | Acesso e responsabilidade |
