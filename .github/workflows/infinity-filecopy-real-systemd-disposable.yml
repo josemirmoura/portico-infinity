@@ -1,0 +1,46 @@
+name: infinity-filecopy-real-systemd-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-filecopy-systemd-e2e.py'
+      - '.github/workflows/infinity-filecopy-real-systemd-disposable.yml'
+      - 'internal/filecopyworker/**'
+      - 'internal/securefs/large_copy.go'
+      - 'cmd/portico-filecopy-worker/**'
+
+permissions:
+  contents: read
+
+jobs:
+  systemd-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build genuine root-owned systemd worker in disposable CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          go mod download
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/portico-filecopy-worker-ci" \
+            ./cmd/portico-filecopy-worker
+          sha256sum "$RUNNER_TEMP/portico-filecopy-worker-ci"
+      - name: Run real systemd, scope confinement, SHA and cancellation E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env \
+            CI="$CI" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            python3 scripts/infinity-filecopy-systemd-e2e.py \
+              --build-binary "$RUNNER_TEMP/portico-filecopy-worker-ci"
