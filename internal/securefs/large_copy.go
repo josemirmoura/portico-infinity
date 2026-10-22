@@ -20,6 +20,9 @@ import (
 // Production policy must set a lower quota for the eventual async worker.
 const MaxBinaryCopyBytes int64 = 1 << 40 // 1 TiB
 
+// ErrCopyReconcile means the destination MAY already be published: never retry blindly.
+var ErrCopyReconcile = errors.New("binary copy publication outcome requires operator reconciliation")
+
 // CopyFileStream is the bounded-memory copying primitive for a future typed,
 // durable binary-copy worker. Unlike CopyFile, it supports configurable sizes
 // above 512 MiB. It is NOT registered as an MCP tool; do not use synchronously
@@ -32,7 +35,7 @@ const MaxBinaryCopyBytes int64 = 1 << 40 // 1 TiB
 // The destination is only published after SHA verification and fsync.
 func (m *Manager) CopyFileStream(
 	ctx context.Context, src, dst string, maxBytes int64,
-	expectedSHA256 string, progress func(done, total int64),
+	expectedSHA256 string, progress func(done, total int64) error,
 ) (string, error) {
 	if ctx == nil { return "", errors.New("context is required") }
 	if maxBytes <= 0 || maxBytes > MaxBinaryCopyBytes {
@@ -132,7 +135,9 @@ func (m *Manager) CopyFileStream(
 		}
 		_, _ = h.Write(buf[:n])
 		done += int64(n)
-		if progress != nil { progress(done, before.Size()) }
+		if progress != nil {
+			if err := progress(done, before.Size()); err != nil { return "", fmt.Errorf("cannot persist copy progress: %w", err) }
+		}
 	}
 	if err := ctx.Err(); err != nil { return "", err }
 	var after unix.Stat_t
@@ -154,7 +159,7 @@ func (m *Manager) CopyFileStream(
 	published = true
 	// Persist the destination directory rename before reporting success.
 	if err := unix.Fsync(parentFD); err != nil {
-		return "", fmt.Errorf("binary destination renamed but directory sync failed; reconciliation required: %w", err)
+		return "", fmt.Errorf("%w: directory fsync failed after rename: %v", ErrCopyReconcile, err)
 	}
 	return sum, nil
 }
