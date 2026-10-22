@@ -27,8 +27,8 @@ func decoded(r *mcp.CallToolResult)(map[string]any,error) {
  if e=json.Unmarshal(raw,&obj);e!=nil{return nil,e}
  return obj,nil
 }
-func sha(p string)(string,error){
- f,e:=os.Open(p);if e!=nil{return "",e};defer f.Close()
+func sha(root *os.Root, leaf string)(string,error){
+ f,e:=root.Open(leaf);if e!=nil{return "",e};defer f.Close()
  h:=sha256.New();if _,e=io.Copy(h,f);e!=nil{return "",e}
  return hex.EncodeToString(h.Sum(nil)),nil
 }
@@ -38,11 +38,15 @@ func main(){
  endpoint:="http://127.0.0.1:18081/mcp"
  token:=os.Getenv("INFINITY_E2E_BEARER_TOKEN")
  if os.Getenv("CI")!="true"||os.Getenv("RUNNER_ENVIRONMENT")!="github-hosted"||
-   os.Getenv("GITHUB_EVENT_NAME")!="pull_request"||run==""||token==""{panic("disposable CI only")}
+   os.Getenv("GITHUB_EVENT_NAME")!="pull_request"||run==""||len(run)>24||token==""{panic("disposable CI only")}
+ for _, c:=range run{if c<'0'||c>'9'{panic("non-numeric GitHub run ID")}}
+ root,e:=os.OpenRoot(dir);if e!=nil{panic(e)};defer root.Close()
  src,dst:=filepath.Join(dir,"real-filecopy-source.gguf"),filepath.Join(dir,"real-filecopy-destination.gguf")
- stat,e:=os.Stat(src);if e!=nil||!stat.Mode().IsRegular()||stat.Size()!=128<<20 {panic("bad synthetic source")}
- if _,e=os.Lstat(dst);!os.IsNotExist(e){panic("destination already exists")}
- want,e:=sha(src);if e!=nil{panic(e)}
+ sourceHandle,e:=root.Open("real-filecopy-source.gguf");if e!=nil{panic(e)}
+ stat,e:=sourceHandle.Stat();_ = sourceHandle.Close()
+ if e!=nil||!stat.Mode().IsRegular()||stat.Size()!=128<<20 {panic("bad synthetic source")}
+ if _,e=root.Stat("real-filecopy-destination.gguf");!os.IsNotExist(e){panic("destination already exists")}
+ want,e:=sha(root,"real-filecopy-source.gguf");if e!=nil{panic(e)}
  ctx,cancel:=context.WithTimeout(context.Background(),150*time.Second);defer cancel()
  client:=mcp.NewClient(&mcp.Implementation{Name:"infinity-filecopy-disposable",Version:"1"},nil)
  session,e:=client.Connect(ctx,&mcp.StreamableClientTransport{
@@ -72,8 +76,8 @@ func main(){
   time.Sleep(200*time.Millisecond)
  }
  if last==nil||last["state"]!="done"{panic(fmt.Errorf("timed out or uncertain: %v",last))}
- got,e:=sha(dst);if e!=nil{panic(e)}
- target,e:=os.Stat(dst)
+ got,e:=sha(root,"real-filecopy-destination.gguf");if e!=nil{panic(e)}
+ target,e:=root.Stat("real-filecopy-destination.gguf")
  if e!=nil||target.Size()!=128<<20||got!=want||last["sha256"]!=want{panic("size/hash mismatch")}
  fmt.Println("MCP_BROKER_SYSTEMD_WORKER_SHA: PASS")
  retry,e:=call("file.copy.start",params);if e!=nil{panic(e)}
