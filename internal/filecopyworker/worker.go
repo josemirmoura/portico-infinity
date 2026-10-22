@@ -243,6 +243,13 @@ func status(dir, id string, phase string, done, total int64, sha string) error {
 // The exclusive flock prevents concurrent workers sharing a job ID.
 // A post-commit I/O error is reported as reconciliation, never re-executed.
 func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
+    return runWithRevocationCheck(ctx, dir, hostRoot, id, IsSubjectRevoked)
+}
+
+// The injected checker supports deterministic adversarial tests without
+// creating an operator-controlled writer in the real production worker.
+func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
+    isRevoked func(string, string) (bool, error)) (string, error) {
     manifest, err := readPinnedManifest(dir, id)
     if err != nil { return "", err }
     lockPath := filepath.Join(dir, id+".lock")
