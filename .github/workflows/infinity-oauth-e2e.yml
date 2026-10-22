@@ -294,38 +294,26 @@ jobs:
           print('REAL AUDIENCE-BOUND TOKEN INTROSPECTION: PASS')
           PY
 
-          # Verify external OAuth token revocation with the *issuing* machine
-          # client, not the resource introspector. Everything is synthetic CI.
-          # Revocation alone returns 200 even for unknown tokens: assert the
-          # formerly active token becomes inactive in fresh introspection.
-          curl_ci -X POST http://zitadel-api:8080/oauth/v2/revoke \
-            -u "$PROBE_CLIENT_ID:$PROBE_CLIENT_SECRET" \
-            -H 'Content-Type: application/x-www-form-urlencoded' \
-            --data-urlencode "token=$ACCESS_TOKEN" \
-            --data-urlencode 'token_type_hint=access_token' \
-            --no-fail --write-out '\n__PORTICO_HTTP_STATUS__%{http_code}' \
-            >/tmp/probe-revoked-response.txt
-          python3 - <<'PY'
-          import json
-          raw=open('/tmp/probe-revoked-response.txt').read()
-          body,status=raw.rsplit('\n__PORTICO_HTTP_STATUS__',1)
-          try:
-              error=json.loads(body).get('error', '(none)')
-          except (ValueError,AttributeError):
-              error='(non-json)'
-          print('ZITADEL REVOKE HTTP:', status.strip(), 'error code:', error)
-          assert status.strip()=='200', 'revoke must return 200'
-          PY
+          # Owner-out-of-band revocation proof: a synthetic bootstrap operator
+          # deactivates the test service account by ZITADEL's independent admin
+          # API, then the resource server introspects the still-unexpired token.
+          # This is distinct from OAuth client-initiated /oauth/v2/revoke,
+          # which rejects machine-account credentials with invalid_client.
+          curl_ci -X POST "http://zitadel-api:8080/v2/users/$PROBE_USER_ID/deactivate" \
+            -H "Authorization: Bearer $PAT" \
+            -H 'Content-Type: application/json' --data '{}' \
+            >/tmp/probe-user-deactivation.json
           curl_ci -X POST http://zitadel-api:8080/oauth/v2/introspect \
             -u "$INTROSPECTION_CLIENT_ID:$INTROSPECTION_CLIENT_SECRET" \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "token=$ACCESS_TOKEN" \
-            >/tmp/probe-token-post-revocation.json
+            >/tmp/probe-token-post-deactivation.json
           python3 - <<'PY'
           import json
-          x=json.load(open('/tmp/probe-token-post-revocation.json'))
-          assert x.get('active') is False, 'formerly active token remained active after revoke'
-          print('REAL ZITADEL ACCESS TOKEN REVOCATION + INTROSPECTION: PASS')
+          x=json.load(open('/tmp/probe-token-post-deactivation.json'))
+          print('ZITADEL POST-DEACTIVATION TOKEN ACTIVE:', str(x.get('active')).lower())
+          assert x.get('active') is False, 'deactivated service account still has an active token'
+          print('REAL ZITADEL OUT-OF-BAND USER DEACTIVATION + INTROSPECTION: PASS')
           PY
 
           curl_ci http://zitadel-api:8080/.well-known/openid-configuration > /tmp/oidc-after.json
