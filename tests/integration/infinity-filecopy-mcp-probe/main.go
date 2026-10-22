@@ -94,10 +94,10 @@ func main(){
  // the *MCP job.cancel tool*, not through an operator shell on the host.
  sourceLeaf:="real-filecopy-cancel-source.gguf"
  cancelledLeaf:="real-filecopy-cancel-destination.gguf"
- sparse,e:=root.OpenFile(sourceLeaf,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
- if e!=nil{panic(e)}
- if e=sparse.Truncate(8<<30);e!=nil{_ = sparse.Close();panic(e)}
- if e=sparse.Close();e!=nil{panic(e)}
+ sourceInfo,e:=root.Stat(sourceLeaf)
+ if e!=nil||!sourceInfo.Mode().IsRegular()||sourceInfo.Size()!=8<<30{
+  panic("missing pre-created sparse cancellation fixture")
+ }
  if _,e=root.Stat(cancelledLeaf);!os.IsNotExist(e){panic("cancel destination exists")}
  cancelArgs:=map[string]any{"path":filepath.Join(dir,sourceLeaf),
   "destination":filepath.Join(dir,cancelledLeaf),"max_bytes":int64(9<<30),
