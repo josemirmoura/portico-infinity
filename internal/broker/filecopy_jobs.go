@@ -71,12 +71,18 @@ func verifyHostFilecopyBinary() error {
     return nil
 }
 
-func persistFilecopyManifest(m filecopyworker.Manifest) error {
-    if err := m.Validate(m.JobID); err != nil { return err }
+func ensureFilecopyStateDir() error {
+    // Fresh Infinity installs do not pre-create this root-only worker folder.
+    // It must be safely initialized BEFORE the authorization fence check.
     if err := os.Mkdir(filecopyBrokerState, 0700); err != nil && !errors.Is(err, os.ErrExist) {
         return err
     }
-    if err := filecopyworker.CheckDir(filecopyBrokerState); err != nil { return err }
+    return filecopyworker.CheckDir(filecopyBrokerState)
+}
+
+func persistFilecopyManifest(m filecopyworker.Manifest) error {
+    if err := m.Validate(m.JobID); err != nil { return err }
+    if err := ensureFilecopyStateDir(); err != nil { return err }
     root, err := os.OpenRoot(filecopyBrokerState)
     if err != nil { return err }
     defer root.Close()
@@ -166,6 +172,9 @@ func (b *Broker) startFilecopy(ctx context.Context, req wire.Request) wire.Respo
     }
     if err := manifest.Validate(manifest.JobID); err != nil {
         return deny(req.ID, "invalid_args", err.Error())
+    }
+    if err := ensureFilecopyStateDir(); err != nil {
+        return deny(req.ID, "reconcile_required", "secure filecopy state directory unavailable; no job dispatched")
     }
     revoked, revocationErr := filecopyworker.IsSubjectRevoked(filecopyBrokerState, req.Subject)
     if revocationErr != nil {
