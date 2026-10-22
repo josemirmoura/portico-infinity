@@ -59,6 +59,47 @@ jobs:
           test -n "$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
           test -n "$(docker ps -q --filter name=unrelated-lifecycle-e2e)"
 
+      - name: Refuse deactivation while a REAL typed systemd filecopy job runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          UNIT="vps-agent-filecopy-$(printf '%s' "$GITHUB_RUN_ID" | sha256sum | cut -c1-32).service"
+          [[ "$UNIT" =~ ^vps-agent-filecopy-[0-9a-f]{32}[.]service$ ]]
+          test "$(systemctl show "$UNIT" -p LoadState --value)" = not-found
+
+          sudo systemd-run --unit="${UNIT%.service}" --no-block --quiet \
+            --property=Type=oneshot --property=RemainAfterExit=yes \
+            /usr/bin/sleep 90
+          cleanup_worker() {
+            sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true
+            sudo systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
+          }
+          trap cleanup_worker EXIT
+          for i in $(seq 1 30); do
+            state="$(systemctl show "$UNIT" -p ActiveState --value)"
+            [[ "$state" = activating || "$state" = active ]] && break
+            sleep 0.1
+          done
+          [[ "$state" = activating || "$state" = active ]]
+          cd /srv/portico-infinity
+          if sudo python3 scripts/infinity-lifecycle.py \
+            --deactivate --confirm DEACTIVATE-INFINITY; then
+            echo 'FAIL: deactivation was allowed while filecopy worker active' >&2
+            exit 1
+          fi
+          if sudo python3 scripts/infinity-lifecycle.py \
+            --uninstall-runtime --confirm UNINSTALL-INFINITY-RUNTIME; then
+            echo 'FAIL: runtime removal was allowed while filecopy active' >&2
+            exit 1
+          fi
+          test -n "$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          test -n "$(docker ps -q --filter name=unrelated-lifecycle-e2e)"
+          echo 'REAL FILECOPY WORKER PREVENTS BOTH LIFECYCLE MUTATIONS: PASS'
+          cleanup_worker
+          trap - EXIT
+
       - name: Prove inventory, reversible deactivation and runtime uninstall
         shell: bash
         run: |

@@ -35,13 +35,21 @@ class FakeHost:
             "Labels": {"com.docker.compose.project": "portico-infinity"},
         }}
         self.workers_active = False
+        self.worker_name = "vps-agent-filecopy-" + ("f" * 32) + ".service"
+        self.worker_phase = "activating"
         self.restart_disabled = set()
 
     def command(self, args):
         args = tuple(args)
         self.calls.append(args)
         if args[0] == "systemctl":
-            return "portico-filecopy-123.service loaded active running\n" if self.workers_active else ""
+            if not self.workers_active:
+                return ""
+            if not any(self.worker_name.startswith(part.split("*", 1)[0])
+                       for part in args if part.endswith("*.service")):
+                return ""
+            return (self.worker_name + " loaded " +
+                    self.worker_phase + " start running\n")
         if args[:2] == ("docker", "ps"):
             return "\n".join(self.containers) + "\n"
         if args[:2] == ("docker", "inspect"):
@@ -153,6 +161,71 @@ class InfinityLifecycleTests(unittest.TestCase):
             MOD.change_runtime("deactivate", host.command)
         self.assertEqual(host.mutations(), [])
 
+    def test_real_vps_agent_worker_activating_blocks_both_operations(self):
+        # The real worker uses this exact unit prefix and is Type=oneshot:
+        # "activating" is the normal phase while copying a large GGUF.
+        for action in ("deactivate", "uninstall"):
+            with self.subTest(action=action):
+                host = FakeHost()
+                host.workers_active = True
+                host.worker_phase = "activating"
+                with self.assertRaisesRegex(MOD.LifecycleError, "active file-copy worker"):
+                    MOD.change_runtime(action, host.command)
+                self.assertEqual(host.mutations(), [])
+                self.assertTrue(any(
+                    cmd[0] == "systemctl" and
+                    "vps-agent-filecopy-*.service" in cmd and
+                    "--state=active,activating,deactivating,reloading" in cmd
+                    for cmd in host.calls
+                ))
+
+    def test_legacy_filecopy_worker_also_blocks(self):
+        host = FakeHost()
+        host.workers_active = True
+        host.worker_name = "portico-filecopy-legacy.service"
+        with self.assertRaisesRegex(MOD.LifecycleError, "active file-copy worker"):
+            MOD.change_runtime("deactivate", host.command)
+        self.assertEqual(host.mutations(), [])
+
+    def test_worker_appearing_after_initial_inventory_blocks(self):
+        host = FakeHost()
+        original = host.command
+        reads = 0
+
+        def racing(args):
+            nonlocal reads
+            result = original(args)
+            if args[0] == "systemctl":
+                reads += 1
+                if reads == 2:
+                    # Worker starts *after* initial two-prefix systemd probe.
+                    # The second probe must detect it before any Docker write.
+                    host.workers_active = True
+            return result
+
+        with self.assertRaisesRegex(MOD.LifecycleError, "active file-copy worker"):
+            MOD.change_runtime("uninstall", racing)
+        self.assertEqual(host.mutations(), [])
+
+    def test_network_membership_race_blocks_before_mutation(self):
+        host = FakeHost()
+        original = host.command
+        reads = 0
+
+        def racing(args):
+            nonlocal reads
+            if args[:3] == ["docker", "network", "ls"]:
+                reads += 1
+                if reads == 2:
+                    # A known member can disappear even without changing the
+                    # container inventory. This must invalidate the preflight.
+                    del host.networks[N]["Containers"][A]
+            return original(args)
+
+        with self.assertRaisesRegex(MOD.LifecycleError, "runtime inventory changed"):
+            MOD.change_runtime("uninstall", racing)
+        self.assertEqual(host.mutations(), [])
+
     def test_preflight_race_aborts_before_mutation(self):
         host = FakeHost()
         original = host.command
@@ -168,7 +241,7 @@ class InfinityLifecycleTests(unittest.TestCase):
                     ]
             return original(args)
 
-        with self.assertRaisesRegex(MOD.LifecycleError, "container set changed"):
+        with self.assertRaisesRegex(MOD.LifecycleError, "runtime inventory changed"):
             MOD.change_runtime("uninstall", racing)
         self.assertEqual(host.mutations(), [])
 
