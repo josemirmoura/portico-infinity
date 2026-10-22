@@ -282,6 +282,22 @@ func readFilecopyProgress(id string) (filecopyworker.Progress,error) {
     return progress,nil
 }
 
+// classifyFilecopyUnit reconciles systemd termination with durable worker
+// checkpoints. In particular, stopped oneshots may be inactive/success even
+// though they persisted phase=cancelled, not phase=done.
+func classifyFilecopyUnit(raw string, progress filecopyworker.Progress, progressErr error) (string, string, *int, error) {
+    // Systemd may record a stopped oneshot as inactive/dead Result=success.
+    // The worker's durably persisted cancelled state takes precedence only
+    // AFTER systemd confirms the unit has terminated.
+    state, detail, code, err := classifyComposeUnit(raw)
+    if err != nil { return "", "", nil, err }
+    if progressErr == nil && progress.Phase == "cancelled" &&
+        (state == "done" || state == "failed") {
+        return "cancelled", "worker persisted cancellation", nil, nil
+    }
+    return state, detail, code, nil
+}
+
 func (b *Broker) filecopyStatus(ctx context.Context, record state.JobRecord) (map[string]any,error) {
     if !filecopyworker.ValidID(record.ID) || record.UnitName != record.ID+".service" ||
         record.Tool != "file.copy.start" {
@@ -290,9 +306,12 @@ func (b *Broker) filecopyStatus(ctx context.Context, record state.JobRecord) (ma
     out,err:=hostexec.CommandContext(ctx,"systemctl","show",record.UnitName,
         "--no-pager","--property=LoadState,ActiveState,SubState,Result,ExecMainStatus").CombinedOutput()
     if err!=nil { return nil,fmt.Errorf("cannot verify filecopy unit: %w",err) }
-    unitState,detail,code,err:=classifyComposeUnit(string(out))
-    if err!=nil { return nil,fmt.Errorf("filecopy unit uncertain: %w",err) }
     progress,progressErr:=readFilecopyProgress(record.ID)
+    // Unlike ordinary successful oneshot jobs, a systemctl stop can report
+    // inactive/dead/Result=success even when the worker exited by cancellation.
+    // The worker's durable terminal checkpoint is authoritative for that case.
+    unitState,detail,code,err:=classifyFilecopyUnit(string(out), progress, progressErr)
+    if err!=nil { return nil,fmt.Errorf("filecopy unit uncertain: %w",err) }
     if unitState=="done" {
         if progressErr!=nil || progress.Phase!="done" || progress.SHA256=="" {
             return nil,errors.New("worker finished but verified final copy metadata is unavailable: reconcile")
