@@ -1,6 +1,6 @@
 # Gates de aceite: Pórtico Infinity
 
-## Atualização verificável em 22/10/2026 (pós-PR #36)
+## Atualização verificável em 22/10/2026 (pós-PR #38)
 
 A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivamente em runners descartáveis do GitHub; não autorizam atualização do SRV-IA nem publicação.
 
@@ -15,10 +15,11 @@ A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivament
 | Reconciliação após restart do Broker | [PR #34](https://github.com/josemirmoura/portico-infinity/pull/34), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39847946672) | 17/17 checks; job systemd preservado, reconexão e cancelamento MCP após restart do contêiner; **não prova reboot do host** |
 | Desativação com worker ativo | [PR #35](https://github.com/josemirmoura/portico-infinity/pull/35), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39850331376) | 20/20 checks; bloqueia desativação e remoção quando worker real está `activating`, sem afetar projetos externos |
 | Desativação com worker falhado | [PR #36](https://github.com/josemirmoura/portico-infinity/pull/36), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39862020998) | 8/8 workflows no head `8ea9e1cf`; falha de worker `systemd` detectada e bloqueada até reconciliação externa |
+| Fence externo de cópias longas por sujeito | [PR #38](https://github.com/josemirmoura/portico-infinity/pull/38), [E2E de revogação](https://github.com/josemirmoura/portico-infinity/actions/runs/39871198739), [E2E Docker/MCP](https://github.com/josemirmoura/portico-infinity/actions/runs/39871198832) | 14/14 workflows SUCCESS no SHA `2b4883a1`; marcador root-owned, rejeição de novos despachos e cancelamento com checkpoint de worker sintético real `systemd`. **Não comprova revogação OAuth ZITADEL e cópia no mesmo ensaio** |
 
 **Bloqueadores reais da v1.0:**
 
-1. Revogação de sessões humanas/refresh tokens e efeitos em jobs ativos; a revogação de conta de serviço sintética cobre apenas parte do requisito.
+1. Revogação de sessões humanas/refresh tokens e ensaio **integrado** ZITADEL OAuth real → MCP → worker ativo → revogação externa; fence de arquivo por sujeito e parada do worker foram aprovados separadamente na PR #38, sem equivaler à revogação geral do acesso.
 2. Reboot, restauração e reconciliação de trabalhos incertos no laboratório e, sob autorização específica, no SRV-IA.
 3. Desinstalação integral isolada, incluindo identidade, volumes, plano de controle e dependências externas, com backup verificável, inventário e confirmação independente. A rotina de remoção de runtime é deliberadamente parcial.
 4. Segurança de efeitos indiretos em serviços root consumidores de arquivos em /opt, testes de escala extrema e integração OAuth + cópia longa num único cenário.
