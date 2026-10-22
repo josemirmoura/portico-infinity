@@ -79,7 +79,7 @@ def inventory(command=run) -> tuple[list[dict], list[dict], list[str]]:
         containers.append({"id": ident, "service": service, "running": state})
 
     networks: list[dict] = []
-    net_ids = _ids(command(["docker", "network", "ls",
+    net_ids = _ids(command(["docker", "network", "ls", "--no-trunc",
                             "--filter", "label=com.docker.compose.project=" + PROJECT,
                             "--format", "{{.ID}}"]))
     for ident in net_ids:
