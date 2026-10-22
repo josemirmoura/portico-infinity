@@ -107,7 +107,7 @@ jobs:
             "VPS_AGENT_INSTANCE_NAME":"portico-infinity",
             "VPS_AGENT_INFINITY_PROTECTED_ROOT":"/srv/portico-infinity",
             "VPS_AGENT_INFINITY_FILECOPY_JOBS":"1",
-            "VPS_AGENT_INFINITY_FILECOPY_MAX_BYTES":"536870912",
+            "VPS_AGENT_INFINITY_FILECOPY_MAX_BYTES":"9663676416",
             "VPS_AGENT_PORT":"18081",
             "VPS_AGENT_AUTH_MODE":"static",
             "VPS_AGENT_GATEWAY_IMAGE":"portico-infinity-gateway:e2e",
