@@ -14,7 +14,8 @@ Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/
 
 - [PR #28](https://github.com/josemirmoura/portico-infinity/pull/28), [E2E de arquivo >2 GiB](https://github.com/josemirmoura/portico-infinity/actions/runs/39825831727), merge `5c4da681903512cd747d9ba328da14ae0def0bfe`: SHA em origem/destino, bytes/progresso, cancelamento após 128 MiB, replay negado.
 - [PR #30](https://github.com/josemirmoura/portico-infinity/pull/30), [E2E systemd real](https://github.com/josemirmoura/portico-infinity/actions/runs/39835994798), merge `07e401d8092782d917f055fea150c1a011e763f4`: cópia de 128 MiB através de unidade systemd, rejeição de `.env`, cancelamento de uma fonte esparsa de 8 GiB e bloqueio de reexecução.
-- **Limite das provas acima:** cada ensaio usa dados sintéticos e host descartável. O fluxo de cliente MCP autenticado até o binário systemd é um gate separado, e o UAT do proprietário é obrigatório.
+- [PR #31](https://github.com/josemirmoura/portico-infinity/pull/31), [E2E Docker + MCP + systemd](https://github.com/josemirmoura/portico-infinity/actions/runs/39837703649), merge `7a118efbc5c046cf834bedab142bd376efe167b1`: cliente MCP com **bearer estático de laboratório** → Gateway → Broker → systemd host → worker. Cópia de 128 MiB, SHA, `job.status`, idempotência, recusa fora do teto e cadeia de auditoria; **17/17 checks CI** no SHA `5b48523351587efcf297aa7633b6fe2f352e1c33`.
+- **Limite das provas acima:** dados sintéticos e hosts descartáveis; OAuth real foi comprovado em workflow independente e ainda não combinado com o worker em um único ensaio. Reinício de host, revogação de jobs ativos, recuperação/reconciliação e UAT do proprietário permanecem obrigatórios.
 
 ## Domínios de confiança
 
@@ -49,4 +50,4 @@ A transferência interrompida não possui retomada em offset comprovada: estados
 
 ## Aceite mínimo futuro
 
-Próximo gate ainda necessário: validar o percurso inteiro MCP/OAuth → Broker → systemd em arquivo >512 MiB sob cota explícita, e a recuperação/reconciliação após interromper/reiniciar Broker/host. Os testes unitários e E2E segmentados acima devem ser reaproveitados, sem repetições indiscriminadas. Sem copiar modelos reais da Nara, sem leitura MCP de bytes binários e sem modificar Community. Ativar no SRV-IA somente após o operador verificar backup e SHA do worker, como etapa independente do MCP.
+Próximo gate ainda necessário: validar OAuth → Broker → systemd com arquivo >512 MiB sob cota explícita no mesmo ensaio, e a recuperação/reconciliação após interromper/reiniciar Broker/host. Os testes unitários e E2E segmentados acima devem ser reaproveitados, sem repetições indiscriminadas. Sem copiar modelos reais da Nara, sem leitura MCP de bytes binários e sem modificar Community. Ativar no SRV-IA somente após o operador verificar backup e SHA do worker, como etapa independente do MCP.
