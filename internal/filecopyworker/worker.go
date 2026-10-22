@@ -334,8 +334,11 @@ func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
         _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
         return "", errors.New("filecopy revocation raced with publication: operator reconciliation required")
     }
-    if revokedDuringCopy && copyErr != nil && !errors.Is(copyErr, securefs.ErrCopyReconcile) {
-        copyErr = context.Canceled
+    if revokedDuringCopy && copyErr != nil && !errors.Is(copyErr, context.Canceled) {
+        // Unexpected I/O errors can coincide with revocation or publication.
+        // Without positive acknowledgement, cancellation is never claimed.
+        _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
+        return "", fmt.Errorf("filecopy revocation result uncertain: %w", copyErr)
     }
     if copyErr != nil {
         phase := "failed"
