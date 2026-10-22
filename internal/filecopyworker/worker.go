@@ -321,6 +321,15 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
         _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
         return "", fmt.Errorf("progress durability failed, reconcile before reuse: %w", progressErr)
     }
+    // A cancellation can race with an atomic rename: never report success
+    // if the stream acknowledged a revocation but returned no error.
+    if revokedDuringCopy && copyErr == nil {
+        _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
+        return "", errors.New("filecopy revocation raced with publication: operator reconciliation required")
+    }
+    if revokedDuringCopy && copyErr != nil && !errors.Is(copyErr, securefs.ErrCopyReconcile) {
+        copyErr = context.Canceled
+    }
     if copyErr != nil {
         phase := "failed"
         if errors.Is(copyErr, context.Canceled) { phase = "cancelled" }
