@@ -121,8 +121,9 @@ func TestWorkerLargeSparseCancellation(t *testing.T) {
         t.Fatalf("cancelled sparse copy must stop without publishing: %v", err)
     }
     progress := readProgress(t, dir, id)
-    if progress.Phase != "cancelled" {
-        t.Fatalf("unexpected cancelled phase: %s", progress.Phase)
+    if progress.Phase != "cancelled" || progress.BytesDone < (128 << 20) {
+        t.Fatalf("cancel must be observed after >=128MiB progress: phase=%s bytes=%d",
+            progress.Phase, progress.BytesDone)
     }
     if _, err := os.Stat(filepath.Join(host, strings.TrimPrefix(dst, "/")));
         !errors.Is(err, os.ErrNotExist) {
