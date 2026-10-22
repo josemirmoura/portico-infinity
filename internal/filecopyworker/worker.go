@@ -307,7 +307,7 @@ func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
         manifest.MaxBytes, manifest.ExpectedSHA256, func(done, total int64) error {
             lastDone, lastTotal = done, total
             if progressErr != nil { return progressErr }
-            denied, checkErr := IsSubjectRevoked(dir, manifest.Subject)
+            denied, checkErr := isRevoked(dir, manifest.Subject)
             if checkErr != nil {
                 progressErr = fmt.Errorf("subject revocation check failed: %w", checkErr)
                 return progressErr
