@@ -31,6 +31,26 @@ Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/
 
 O controlador `/srv` e o executável host fora do teto selecionado **não são modificáveis pelo MCP**. O worker recebe acesso de leitura/escrita apenas ao teto fixado pelo operador para aquela instalação. Ele recusa caminhos fora do escopo, traversal, symlinks, hardlinks, `.env*`, origem=destino e cota inexistente/superior a 1 TiB.
 
+## Revogação externa de cópias longas (implementação candidata, sujeita a CI)
+
+A desativação de um usuário no ZITADEL bloqueia novas solicitações OAuth, mas **não cancela automaticamente** um worker `systemd` despachado antes da revogação. O fluxo técnico acrescenta um *fence persistente* por sujeito, criado pelo operador fora do MCP, e cancelamento tipado dos jobs daquele sujeito.
+
+- O marcador `revoked-subject-<sha256(UTF8(subject))>.marker` reside em `/srv/portico-infinity/state/filecopy-jobs` (no Broker montado em `/var/lib/vps-agent/filecopy-jobs`). Nunca é escrito dentro do teto delegado ou por um pedido MCP; verificação de dono, tipo, permissões e hardlinks falha fechada.
+- O Broker nega `file.copy.start` de sujeitos marcados antes de criar novos manifestos. O worker também consulta o marcador antes de iniciar e em cada callback de progresso do fluxo binário, abortando com estado durável `cancelled`, quando a interrupção é confirmada.
+- Para parar operações em andamento de forma determinística, o console externo executa `scripts/infinity-revoke-filecopy-subject.py` com o sujeito exato e confirmação específica. O utilitário primeiro persiste o fence, depois identifica manifestos root-owned vinculados à identidade, para somente unidades `vps-agent-filecopy-<32hex>.service` e lê o progresso durável. **Resultados duvidosos são relatados como incertos**, exigindo investigação externa. Nenhuma cópia de usuário é excluída por essa rotina.
+- A operação é idempotente. O marcador permanece ativo durante reinícios; sua remoção ou restauração de privilégios requer protocolo de operador separado. Revogação de OAuth e sessões/refresh tokens deve acontecer **também por canal externo ao MCP**, com verificação de token antigo negado. O marcador é específico de cópias longas, não representa revogação geral do Gateway.
+- O commit atômico do destino pode competir com o cancelamento. Se já estiver publicado, o resultado pode ser `done`; se os registros forem contraditórios, permanecer em `reconcile_required`. Nenhuma camada pode prometer que `systemctl stop` sempre significa que o destino não foi publicado.
+
+Exemplo de operação independente, **somente após revisão do sujeito** e em instalação autorizada (ainda não executar no SRV-IA):
+
+```bash
+cd /srv/portico-infinity
+sudo python3 scripts/infinity-revoke-filecopy-subject.py --subject 'SUJEITO-OAUTH-EXATO' --dry-run
+sudo python3 scripts/infinity-revoke-filecopy-subject.py --subject 'SUJEITO-OAUTH-EXATO' --revoke --confirm REVOKE-INFINITY-FILECOPY-SUBJECT
+```
+
+**Limites do gate atual:** sem prova, por esta alteração isolada, de revogação interativa/refresh tokens no ZITADEL real, reboot de host ou cancelamento de um worker de produção. Exigir CI positivo/negativo no SHA, E2E OAuth + cópia longa combinado em runner isolado, e UAT antes de considerar o requisito integral concluído.
+
 ## Ciclo do job
 
 `validated → manifest_persisted → job_sqlite_persisted → systemd_dispatch_pending → running → done | failed | cancelled | reconcile_required`

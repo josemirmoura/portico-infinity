@@ -7,6 +7,7 @@ package filecopyworker
 import (
     "context"
     "crypto/rand"
+    "crypto/sha256"
     "encoding/hex"
     "encoding/json"
     "errors"
@@ -136,6 +137,39 @@ func CheckDir(dir string) error {
     return nil
 }
 
+// SubjectRevocationMarker names an independently operator-owned, durable fence.
+// This record is outside the agent's writable filesystem ceiling and is
+// deliberately not derived from a filename supplied by the MCP client.
+func SubjectRevocationMarker(subject string) (string, error) {
+    if len(subject) == 0 || len(subject) > MaxSubjectBytes {
+        return "", errors.New("invalid filecopy owner identity")
+    }
+    digest := sha256.Sum256([]byte(subject))
+    return "revoked-subject-" + hex.EncodeToString(digest[:]) + ".marker", nil
+}
+
+// IsSubjectRevoked fails closed for unsafe metadata or any I/O error.
+// No OAuth token/credential is stored here. The outside-of-MCP operator
+// creates the persistent marker BEFORE stopping active typed systemd units.
+func IsSubjectRevoked(dir, subject string) (bool, error) {
+    marker, err := SubjectRevocationMarker(subject)
+    if err != nil { return false, err }
+    if err := CheckDir(dir); err != nil { return false, err }
+    root, err := os.OpenRoot(dir)
+    if err != nil { return false, err }
+    defer root.Close()
+    info, err := root.Lstat(marker)
+    if errors.Is(err, os.ErrNotExist) { return false, nil }
+    if err != nil { return false, err }
+    stat, ok := info.Sys().(*syscall.Stat_t)
+    if !ok || !info.Mode().IsRegular() || stat.Nlink != 1 ||
+        int(stat.Uid) != os.Geteuid() || info.Mode().Perm()&0077 != 0 ||
+        info.Size() > 256 {
+        return false, errors.New("unsafe subject revocation marker: operator reconciliation required")
+    }
+    return true, nil
+}
+
 func readPinnedManifest(dir, id string) (Manifest, error) {
     var manifest Manifest
     if !ValidID(id) { return manifest, errors.New("invalid job id") }
@@ -209,6 +243,13 @@ func status(dir, id string, phase string, done, total int64, sha string) error {
 // The exclusive flock prevents concurrent workers sharing a job ID.
 // A post-commit I/O error is reported as reconciliation, never re-executed.
 func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
+    return runWithRevocationCheck(ctx, dir, hostRoot, id, IsSubjectRevoked)
+}
+
+// The injected checker supports deterministic adversarial tests without
+// creating an operator-controlled writer in the real production worker.
+func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
+    isRevoked func(string, string) (bool, error)) (string, error) {
     manifest, err := readPinnedManifest(dir, id)
     if err != nil { return "", err }
     lockPath := filepath.Join(dir, id+".lock")
@@ -248,6 +289,12 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
         return "", openErr
     }
     if err := progressRoot.Close(); err != nil { return "", err }
+    revoked, checkErr := isRevoked(dir, manifest.Subject)
+    if checkErr != nil { return "", fmt.Errorf("cannot verify filecopy revocation fence: %w", checkErr) }
+    if revoked {
+        if err := status(dir, id, "cancelled", 0, 0, ""); err != nil { return "", err }
+        return "", context.Canceled
+    }
     if err := status(dir, id, "running", 0, 0, ""); err != nil { return "", err }
     selected := manifest.selectedScope()
     fs, err := securefs.NewWithHostRoot([]string{selected}, []string{selected}, securefs.DefaultMaxBytes, hostRoot)
@@ -255,10 +302,20 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
     var lastDone, lastTotal, recorded int64
     lastReport := time.Now()
     var progressErr error
+    revokedDuringCopy := false
     sha, copyErr := fs.CopyFileStream(ctx, manifest.Source, manifest.Destination,
         manifest.MaxBytes, manifest.ExpectedSHA256, func(done, total int64) error {
             lastDone, lastTotal = done, total
             if progressErr != nil { return progressErr }
+            denied, checkErr := isRevoked(dir, manifest.Subject)
+            if checkErr != nil {
+                progressErr = fmt.Errorf("subject revocation check failed: %w", checkErr)
+                return progressErr
+            }
+            if denied {
+                revokedDuringCopy = true
+                return context.Canceled
+            }
             if done-recorded < progressStep && time.Since(lastReport) < time.Second && done != total {
                 return nil
             }
@@ -270,6 +327,18 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
         // The destination may already have been atomically published.
         _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
         return "", fmt.Errorf("progress durability failed, reconcile before reuse: %w", progressErr)
+    }
+    // A cancellation can race with an atomic rename: never report success
+    // if the stream acknowledged a revocation but returned no error.
+    if revokedDuringCopy && copyErr == nil {
+        _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
+        return "", errors.New("filecopy revocation raced with publication: operator reconciliation required")
+    }
+    if revokedDuringCopy && copyErr != nil && !errors.Is(copyErr, context.Canceled) {
+        // Unexpected I/O errors can coincide with revocation or publication.
+        // Without positive acknowledgement, cancellation is never claimed.
+        _ = status(dir, id, "reconcile_required", lastDone, lastTotal, "")
+        return "", fmt.Errorf("filecopy revocation result uncertain: %w", copyErr)
     }
     if copyErr != nil {
         phase := "failed"

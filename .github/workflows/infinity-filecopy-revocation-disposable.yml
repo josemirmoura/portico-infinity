@@ -1,0 +1,133 @@
+name: infinity-filecopy-revocation-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'internal/filecopyworker/**'
+      - 'internal/broker/filecopy_jobs.go'
+      - 'scripts/infinity-revoke-filecopy-subject.py'
+      - 'tests/scripts/test_infinity_filecopy_revocation.py'
+      - '.github/workflows/infinity-filecopy-revocation-disposable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  operator-revocation:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Operator-only Python regressions (no host mutations)
+        run: python3 -m unittest -v tests/scripts/test_infinity_filecopy_revocation.py
+      - name: Go worker unit revocation tests
+        run: go test -count=1 -timeout=4m ./internal/filecopyworker ./internal/broker -run 'Test(OperatorFence|RevocationFence|MidStreamRevocation|Filecopy)'
+      - name: Install isolated root-owned operator fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          sudo install -d -o root -g root -m 0755 /srv/portico-infinity/scripts
+          sudo install -d -o root -g root -m 0700 /srv/portico-infinity/state/filecopy-jobs
+          sudo install -o root -g root -m 0644 scripts/infinity-revoke-filecopy-subject.py \
+            /srv/portico-infinity/scripts/infinity-revoke-filecopy-subject.py
+          sudo tee /srv/portico-infinity/scripts/synthetic-worker.py >/dev/null <<'PY'
+          import json
+          import os
+          import signal
+          import sys
+          import time
+          state, job_id = sys.argv[1:]
+          path = os.path.join(state, job_id + ".progress.json")
+          def save(phase):
+              tmp = path + ".pending"
+              with open(tmp, "w", encoding="utf-8") as fh:
+                  json.dump({"job_id": job_id, "phase": phase}, fh)
+                  fh.flush()
+                  os.fsync(fh.fileno())
+              os.chmod(tmp, 0o600)
+              os.replace(tmp, path)
+          def stop(*_):
+              save("cancelled")
+              raise SystemExit(0)
+          signal.signal(signal.SIGTERM, stop)
+          save("running")
+          while True:
+              time.sleep(0.5)
+          PY
+          sudo chown root:root /srv/portico-infinity/scripts/synthetic-worker.py
+          sudo chmod 0644 /srv/portico-infinity/scripts/synthetic-worker.py
+          sudo python3 - <<'PY'
+          import json
+          path = "/srv/portico-infinity/state/filecopy-jobs/"
+          ident = "vps-agent-filecopy-" + "a" * 32
+          with open(path + ident + ".request.json", "w", encoding="utf-8") as f:
+              json.dump({"job_id":ident, "subject":"synthetic-revoked-subject",
+                         "source":"/opt/e2e/source.gguf","destination":"/opt/e2e/dest.gguf",
+                         "max_bytes":134217728}, f)
+          PY
+          sudo chmod 0600 /srv/portico-infinity/state/filecopy-jobs/vps-agent-filecopy-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.request.json
+
+      - name: Revoke while a real typed systemd unit is active
+        shell: bash
+        run: |
+          set -euo pipefail
+          ID="vps-agent-filecopy-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          UNIT="$ID.service"
+          FOREIGN="infinity-foreign-${GITHUB_RUN_ID}.service"
+          cleanup_units() {
+            sudo systemctl stop "$UNIT" "$FOREIGN" >/dev/null 2>&1 || true
+            sudo systemctl reset-failed "$UNIT" "$FOREIGN" >/dev/null 2>&1 || true
+          }
+          trap cleanup_units EXIT
+          test "$(systemctl show "$UNIT" -p LoadState --value)" = not-found
+          sudo systemd-run --unit="${UNIT%.service}" --no-block --quiet \
+            --property=Type=oneshot --property=RemainAfterExit=yes \
+            /usr/bin/python3 /srv/portico-infinity/scripts/synthetic-worker.py \
+            /srv/portico-infinity/state/filecopy-jobs "$ID"
+          sudo systemd-run --unit="${FOREIGN%.service}" --no-block --quiet /usr/bin/sleep 90
+          for i in $(seq 1 100); do
+            sudo test -f "/srv/portico-infinity/state/filecopy-jobs/$ID.progress.json" && break
+            sleep 0.1
+          done
+          sudo test -f "/srv/portico-infinity/state/filecopy-jobs/$ID.progress.json"
+          cd /srv/portico-infinity
+          sudo python3 scripts/infinity-revoke-filecopy-subject.py \
+            --subject synthetic-revoked-subject --dry-run
+          sudo python3 scripts/infinity-revoke-filecopy-subject.py \
+            --subject synthetic-revoked-subject --revoke \
+            --confirm REVOKE-INFINITY-FILECOPY-SUBJECT
+          sudo python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path("/srv/portico-infinity/state/filecopy-jobs")
+          ident = "vps-agent-filecopy-" + "a" * 32
+          marker = root / ("revoked-subject-" +
+                           hashlib.sha256(b"synthetic-revoked-subject").hexdigest() + ".marker")
+          assert marker.exists() and marker.stat().st_mode & 0o777 == 0o600
+          progress = json.loads((root / (ident + ".progress.json")).read_text())
+          assert progress["phase"] == "cancelled", progress
+          print("EXTERNAL_FENCE_TYPED_SYSTEMD_CANCEL_CONFIRMED: PASS")
+          PY
+          test "$(systemctl show "$UNIT" -p ActiveState --value)" != activating
+          test "$(systemctl is-active "$FOREIGN")" = active
+          sudo python3 scripts/infinity-revoke-filecopy-subject.py \
+            --subject synthetic-revoked-subject --revoke \
+            --confirm REVOKE-INFINITY-FILECOPY-SUBJECT
+          echo 'REVOCATION IDEMPOTENCY AND FOREIGN UNIT ISOLATION: PASS'
+          cleanup_units
+          trap - EXIT
+
+      - name: Remove only isolated synthetic fixture
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo systemctl stop vps-agent-filecopy-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.service >/dev/null 2>&1 || true
+          sudo systemctl reset-failed vps-agent-filecopy-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.service >/dev/null 2>&1 || true
+          sudo systemctl stop "infinity-foreign-${GITHUB_RUN_ID}.service" >/dev/null 2>&1 || true
+          sudo systemctl reset-failed "infinity-foreign-${GITHUB_RUN_ID}.service" >/dev/null 2>&1 || true
+          if test -d /srv/portico-infinity; then sudo rm -rf /srv/portico-infinity; fi
