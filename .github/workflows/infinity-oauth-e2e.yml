@@ -804,7 +804,7 @@ jobs:
                         "durable_systemd_cancel_no_destination",
                         "real_zitadel_subject_deactivated",
                         "revoked_access_token_mcp_401"],
-            "privileged_broker":False,
+            "privileged_broker":True,  # only temporary host-capable Broker for the combined copy test
             "scope":"/opt",
             "controller_outside_scope":"/srv/portico-infinity",
             "oauth_integrated_real":True,
