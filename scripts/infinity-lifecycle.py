@@ -116,11 +116,12 @@ def ensure_no_active_workers(command=run) -> None:
     # The earlier portico-filecopy-only probe missed running jobs and could
     # allow the controller to stop with an independent privileged copy active.
     # Include activating oneshots: Type=oneshot workers remain "activating"
-    # until the binary exits. A retained active/exited unit is conservatively
-    # rejected until the operator reconciles/cleans it out of band.
+    # until the binary exits. Failed units can represent incomplete writes or
+    # uncertain durable results and must be reconciled outside the MCP before
+    # controller deactivation. Retained active/exited units are also blocked.
     for prefix in ("vps-agent-filecopy-", "portico-filecopy-"):
-        output = command(["systemctl", "list-units", "--type=service",
-                          "--state=active,activating,deactivating,reloading",
+        output = command(["systemctl", "list-units", "--all", "--type=service",
+                          "--state=active,activating,deactivating,reloading,failed",
                           "--no-legend", "--no-pager", "--full",
                           prefix + "*.service"])
         if any(prefix in line and ".service" in line for line in output.splitlines()):
