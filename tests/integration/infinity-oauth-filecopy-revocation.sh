@@ -117,37 +117,72 @@ probe() {
     python:3.12-slim-bookworm python3 /pki/oauth-filecopy-probe.py "$1"
 }
 
+# Derive the exact typed unit from the authenticated subject + operation ID.
+# Start an independent host watcher BEFORE the MCP request, avoiding the
+# race in which a fast 8 GiB sparse transfer finished before shell polling.
+expected_job="$(python3 - "$SUBJECT" "$GITHUB_RUN_ID" <<'PY'
+import hashlib,sys
+subject,run=sys.argv[1:]
+op="oauth-filecopy-inflight-"+run
+print("vps-agent-filecopy-"+hashlib.sha256((subject+"\\x00"+op).encode()).hexdigest()[:32])
+PY
+)"
+[[ "$expected_job" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]
+UNIT="$expected_job.service"
+WATCH_LOG="$RUNNER_TEMP/${IDENT}-freeze-watcher.log"
+sudo python3 - "$STATE/$expected_job.progress.json" "$UNIT" <<'PY' >"$WATCH_LOG" 2>&1 &
+import json,subprocess,sys,time
+path,unit=sys.argv[1:]
+for _ in range(1800):
+    try:
+        with open(path,encoding="utf-8") as fd:
+            progress=json.load(fd)
+        if progress.get("phase")=="running":
+            result=subprocess.run(["systemctl","kill","--kill-whom=main",
+                                   "--signal=STOP",unit],
+                                  capture_output=True,text=True,timeout=5)
+            if result.returncode==0:
+                print("REAL_OAUTH_SYSTEMD_INFLIGHT_WORKER_FROZEN: PASS")
+                sys.exit(0)
+            # A process can be between systemd-run and PID registration.
+    except (OSError,ValueError,subprocess.TimeoutExpired):
+        pass
+    time.sleep(0.02)
+raise SystemExit("could not freeze active systemd copy before terminal state")
+PY
+watch_pid=$!
 JOB="$(probe start)"
 [[ "$JOB" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]] || {
+  wait "$watch_pid" || true
   echo "E2E failed: no real OAuth MCP filecopy job" >&2
   exit 1
 }
-UNIT="$JOB.service"
+test "$JOB" = "$expected_job" || {
+  echo "real authenticated principal unexpectedly changed job identity" >&2
+  exit 1
+}
 echo "REAL_ZITADEL_AUTHENTICATED_MCP_FILECOPY_START: PASS"
-
-# Check durable worker progress while preventing a fast sparse copy from
-# publishing before the external revocation takes effect.
-progress=0
-for i in $(seq 1 280); do
-  progress="$(sudo python3 - "$STATE/$JOB.progress.json" <<'PY'
+if ! wait "$watch_pid"; then
+  cat "$WATCH_LOG" >&2
+  sudo systemctl show "$UNIT" --property=ActiveState,SubState,Result --no-pager >&2 || true
+  sudo python3 - "$STATE/$JOB.progress.json" <<'PY'
 import json,sys
 try:
-    status=json.load(open(sys.argv[1]))
-    print(status.get("bytes_done",0) if status.get("phase")=="running" else -1)
-except (OSError,ValueError):
-    print(0)
+    doc=json.load(open(sys.argv[1]))
+    print("Worker phase:",doc.get("phase"),"bytes:",doc.get("bytes_done"))
+except (OSError,ValueError) as error:
+    print("Worker checkpoint unavailable:",str(error))
 PY
-)"
-  test "$progress" -ge 67108864 && break
-  test "$progress" -ge 0 || {
-    echo "worker already terminal before revocation" >&2
-    exit 1
-  }
-  sleep 0.2
-done
-test "$progress" -ge 67108864
-sudo systemctl kill --kill-whom=main --signal=STOP "$UNIT"
+  exit 1
+fi
+cat "$WATCH_LOG"
 test "$(sudo systemctl show "$UNIT" -p ActiveState --value)" = activating
+sudo python3 - "$STATE/$JOB.progress.json" <<'PY'
+import json,sys
+doc=json.load(open(sys.argv[1]))
+assert doc["phase"]=="running",doc
+print("REAL_OAUTH_FILECOPY_DURABLE_RUNNING_STATE: PASS")
+PY
 
 # ZITADEL's unexpired token is still active when the external operator
 # fences the subject. Persist the fence FIRST, and only then allow TERM.
