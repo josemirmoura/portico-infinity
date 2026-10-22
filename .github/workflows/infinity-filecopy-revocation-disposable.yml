@@ -49,6 +49,7 @@ jobs:
                   json.dump({"job_id": job_id, "phase": phase}, fh)
                   fh.flush()
                   os.fsync(fh.fileno())
+              os.chmod(tmp, 0o600)
               os.replace(tmp, path)
           def stop(*_):
               save("cancelled")
