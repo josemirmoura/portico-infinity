@@ -183,6 +183,31 @@ class InfinityLifecycleTests(unittest.TestCase):
                     for cmd in host.calls
                 ))
 
+    def test_failed_filecopy_worker_blocks_deactivation_and_uninstall(self):
+        # After a worker crashes, the final copy/cleanup status may be
+        # uncertain. An operator must reconcile the failed unit explicitly.
+        for action in ("deactivate", "uninstall"):
+            with self.subTest(action=action):
+                host = FakeHost()
+                host.workers_active = True
+                host.worker_phase = "failed"
+                with self.assertRaisesRegex(MOD.LifecycleError, "active file-copy worker"):
+                    MOD.change_runtime(action, host.command)
+                self.assertEqual(host.mutations(), [])
+                self.assertTrue(any(
+                    cmd[0] == "systemctl"
+                    and "--all" in cmd
+                    and "failed" in next((v for v in cmd if v.startswith("--state=")), "")
+                    for cmd in host.calls
+                ))
+
+    def test_inactive_filecopy_unit_does_not_block_normal_lifecycle(self):
+        host = FakeHost()
+        host.workers_active = True
+        host.worker_phase = "inactive"
+        self.assertEqual(MOD.change_runtime("deactivate", host.command), (3, 0))
+        self.assertEqual(len(host.restart_disabled), 3)
+
     def test_legacy_filecopy_worker_also_blocks(self):
         host = FakeHost()
         host.workers_active = True
