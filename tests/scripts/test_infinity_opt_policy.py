@@ -59,6 +59,28 @@ class InfinityOptPolicyTests(unittest.TestCase):
         self.configure()
         self.assertEqual(once, self.policy.read_bytes())
 
+    def test_alternate_existing_root_bound_to_exact_policy(self):
+        scope = "/mnt"
+        if not Path(scope).is_dir():
+            self.skipTest("runner does not provide a protected /mnt")
+        self.env.write_text("VPS_AGENT_SCOPE_ROOT=/mnt\\nVPS_AGENT_WHOLE_HOST=0\\n".replace("\\n", "\n"))
+        self.policy.write_text(default_policy().replace("/opt", "/mnt"))
+        self.configure()
+        lists = MOD.delegate.parse_lists(self.policy.read_text())
+        for field in MOD.ROOT_KEYS:
+            self.assertEqual(lists[field], [scope])
+        self.assertIn("    - chown", self.policy.read_text())
+
+    def test_alternate_root_must_match_policy(self):
+        self.env.write_text("VPS_AGENT_SCOPE_ROOT=/mnt\\nVPS_AGENT_WHOLE_HOST=0\\n".replace("\\n", "\n"))
+        self.assert_rejected_unchanged()
+
+    def test_protected_roots_and_noncanonical_roots_fail_closed(self):
+        for scope in ("/etc", "/srv", "/srv/portico-infinity", "/", "/tmp", "/mnt/../etc", "/opt/"):
+            with self.subTest(scope=scope):
+                self.env.write_text(f"VPS_AGENT_SCOPE_ROOT={scope}\\nVPS_AGENT_WHOLE_HOST=0\\n".replace("\\n", "\n"))
+                self.assert_rejected_unchanged()
+
     def test_refuses_whole_host(self):
         self.env.write_text("VPS_AGENT_SCOPE_ROOT=/opt\nVPS_AGENT_WHOLE_HOST=1\n")
         self.assert_rejected_unchanged()
