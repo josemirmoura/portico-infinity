@@ -48,6 +48,10 @@ class FakeHost:
             if not any(self.worker_name.startswith(part.split("*", 1)[0])
                        for part in args if part.endswith("*.service")):
                 return ""
+            states = next((v.partition("=")[2].split(",") for v in args
+                           if v.startswith("--state=")), [])
+            if self.worker_phase not in states:
+                return ""
             return (self.worker_name + " loaded " +
                     self.worker_phase + " start running\n")
         if args[:2] == ("docker", "ps"):
