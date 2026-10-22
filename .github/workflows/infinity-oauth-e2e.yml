@@ -834,12 +834,14 @@ jobs:
           echo "::add-mask::$ACCESS_TOKEN"
           echo "::add-mask::$PAT"
           echo "::add-mask::${INTRO_CREDENTIALS[1]}"
+          AUTH_HEADER="$(printf '%s:%s' "${INTRO_CREDENTIALS[0]}" "${INTRO_CREDENTIALS[1]}" | base64 -w0)"
+          echo "::add-mask::$AUTH_HEADER"
           curl_ci() {
             docker run --rm -i --network ci-edge curlimages/curl:8.16.0 \
               -fsS -H 'Host: mcp.example.invalid' -H 'X-Forwarded-Proto: https' "$@"
           }
           curl_ci -X POST http://zitadel-api:8080/oauth/v2/introspect \
-            -u "${INTRO_CREDENTIALS[0]}:${INTRO_CREDENTIALS[1]}" \
+            -H "Authorization: Basic $AUTH_HEADER" \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "token=$ACCESS_TOKEN" >/tmp/revocation-active-before.json
           python3 - <<'PY'
@@ -854,7 +856,7 @@ jobs:
             -H 'Content-Type: application/json' --data '{}' \
             >/tmp/revocation-deactivation.json
           curl_ci -X POST http://zitadel-api:8080/oauth/v2/introspect \
-            -u "${INTRO_CREDENTIALS[0]}:${INTRO_CREDENTIALS[1]}" \
+            -H "Authorization: Basic $AUTH_HEADER" \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "token=$ACCESS_TOKEN" >/tmp/revocation-active-after.json
           python3 - <<'PY'
