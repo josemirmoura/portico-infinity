@@ -295,10 +295,20 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
     var lastDone, lastTotal, recorded int64
     lastReport := time.Now()
     var progressErr error
+    revokedDuringCopy := false
     sha, copyErr := fs.CopyFileStream(ctx, manifest.Source, manifest.Destination,
         manifest.MaxBytes, manifest.ExpectedSHA256, func(done, total int64) error {
             lastDone, lastTotal = done, total
             if progressErr != nil { return progressErr }
+            denied, checkErr := IsSubjectRevoked(dir, manifest.Subject)
+            if checkErr != nil {
+                progressErr = fmt.Errorf("subject revocation check failed: %w", checkErr)
+                return progressErr
+            }
+            if denied {
+                revokedDuringCopy = true
+                return context.Canceled
+            }
             if done-recorded < progressStep && time.Since(lastReport) < time.Second && done != total {
                 return nil
             }
