@@ -11,7 +11,6 @@ import (
     "os"
     "path/filepath"
     "strconv"
-    "strings"
     "syscall"
     "time"
 
@@ -286,24 +285,17 @@ func readFilecopyProgress(id string) (filecopyworker.Progress,error) {
 // classifyFilecopyUnit reconciles systemd termination with durable worker
 // checkpoints. In particular, stopped oneshots may be inactive/success even
 // though they persisted phase=cancelled, not phase=done.
-func classifyFilecopyUnit(raw string, progress filecopyworker.Progress, progressErr error) (string,string,*int,error) {
-    if progressErr == nil && progress.Phase == "cancelled" {
-        fields:=make(map[string]string)
-        for _,line:=range strings.Split(raw,"\\n") {
-            key,value,ok:=strings.Cut(line,"=")
-            if ok { fields[strings.TrimSpace(key)]=strings.TrimSpace(value) }
-        }
-        if fields["LoadState"]!="loaded" {
-            return "","",nil,errors.New("cancelled filecopy unit missing: reconcile")
-        }
-        active,sub:=fields["ActiveState"],fields["SubState"]
-        if (active=="inactive" && sub=="dead") ||
-            (active=="failed" && sub=="failed") {
-            return "cancelled","worker persisted terminal cancellation",nil,nil
-        }
-        return "","",nil,errors.New("filecopy cancellation not yet confirmed by systemd")
+func classifyFilecopyUnit(raw string, progress filecopyworker.Progress, progressErr error) (string, string, *int, error) {
+    // Systemd may record a stopped oneshot as inactive/dead Result=success.
+    // The worker's durably persisted cancelled state takes precedence only
+    // AFTER systemd confirms the unit has terminated.
+    state, detail, code, err := classifyComposeUnit(raw)
+    if err != nil { return "", "", nil, err }
+    if progressErr == nil && progress.Phase == "cancelled" &&
+        (state == "done" || state == "failed") {
+        return "cancelled", "worker persisted cancellation", nil, nil
     }
-    return classifyComposeUnit(raw)
+    return state, detail, code, nil
 }
 
 func (b *Broker) filecopyStatus(ctx context.Context, record state.JobRecord) (map[string]any,error) {
