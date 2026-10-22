@@ -194,11 +194,14 @@ class InfinityLifecycleTests(unittest.TestCase):
 
         def racing(args):
             nonlocal reads
-            if args[:2] == ["docker", "ps"]:
+            result = original(args)
+            if args[0] == "systemctl":
                 reads += 1
                 if reads == 2:
+                    # Worker starts *after* initial two-prefix systemd probe.
+                    # The second probe must detect it before any Docker write.
                     host.workers_active = True
-            return original(args)
+            return result
 
         with self.assertRaisesRegex(MOD.LifecycleError, "active file-copy worker"):
             MOD.change_runtime("uninstall", racing)
