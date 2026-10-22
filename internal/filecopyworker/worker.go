@@ -137,6 +137,39 @@ func CheckDir(dir string) error {
     return nil
 }
 
+// SubjectRevocationMarker names an independently operator-owned, durable fence.
+// This record is outside the agent's writable filesystem ceiling and is
+// deliberately not derived from a filename supplied by the MCP client.
+func SubjectRevocationMarker(subject string) (string, error) {
+    if len(subject) == 0 || len(subject) > MaxSubjectBytes {
+        return "", errors.New("invalid filecopy owner identity")
+    }
+    digest := sha256.Sum256([]byte(subject))
+    return "revoked-subject-" + hex.EncodeToString(digest[:]) + ".marker", nil
+}
+
+// IsSubjectRevoked fails closed for unsafe metadata or any I/O error.
+// No OAuth token/credential is stored here. The outside-of-MCP operator
+// creates the persistent marker BEFORE stopping active typed systemd units.
+func IsSubjectRevoked(dir, subject string) (bool, error) {
+    marker, err := SubjectRevocationMarker(subject)
+    if err != nil { return false, err }
+    if err := CheckDir(dir); err != nil { return false, err }
+    root, err := os.OpenRoot(dir)
+    if err != nil { return false, err }
+    defer root.Close()
+    info, err := root.Lstat(marker)
+    if errors.Is(err, os.ErrNotExist) { return false, nil }
+    if err != nil { return false, err }
+    stat, ok := info.Sys().(*syscall.Stat_t)
+    if !ok || !info.Mode().IsRegular() || stat.Nlink != 1 ||
+        int(stat.Uid) != os.Geteuid() || info.Mode().Perm()&0077 != 0 ||
+        info.Size() > 256 {
+        return false, errors.New("unsafe subject revocation marker: operator reconciliation required")
+    }
+    return true, nil
+}
+
 func readPinnedManifest(dir, id string) (Manifest, error) {
     var manifest Manifest
     if !ValidID(id) { return manifest, errors.New("invalid job id") }
