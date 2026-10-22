@@ -1,0 +1,45 @@
+name: Infinity cancellation hotfix operator script
+
+on:
+  push:
+    paths:
+      - scripts/infinity-scale001-cancel020-operator-upgrade.sh
+      - .github/workflows/infinity-cancel020-operator-script.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-script-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse without running operator script
+        run: bash -n scripts/infinity-scale001-cancel020-operator-upgrade.sh
+      - name: Verify immutable rollout boundaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/infinity-scale001-cancel020-operator-upgrade.sh')
+          s=p.read_text()
+          requirements={
+            'old version': 'OLD=c269d980d91392c2eca9ab92ab2eaa132efc6752',
+            'approved target': 'TARGET=119f31aa15212e2b3a1324764433362698ecf29c',
+            'consistent backup': 'BACKUP_VERIFIED=$backup',
+            'worker identity': '4d286ba440d12bec518683c24b0ccafb5869e63980ddfc3311bd1d59a9f8c230',
+            'disable flag': 'WORKER_FEATURE_ENABLED=NO',
+            'scope layout': 'scripts/check-infinity-layout.py',
+            'no schema drift': 'internal/state/',
+            'fixed overlay': 'compose.infinity-auth.remote.yaml',
+          }
+          for key,fragment in requirements.items():
+            if fragment not in s:
+              raise SystemExit('MISSING '+key)
+          if s.count('UPGRADE_CANCEL020_COMPLETED=') != 1:
+            raise SystemExit('duplicated rollout')
+          if 'docker compose down' in s or 'rm -rf ' in s or 'docker cp ' in s:
+            raise SystemExit('unexpected mutation')
+          print('OPERATOR_CANCEL020_STATIC_GATES=PASS')
+          PY
