@@ -221,243 +221,22 @@ jobs:
             ./tests/integration/infinity-filecopy-recovery-probe
           "$RUNNER_TEMP/filecopy-recovery-probe" -phase start
 
-          # The job identifier is minted by the Broker and stored under the
-          # synthetic root. Verify exact systemd unit grammar before using it.
           JOB_ID="$(sudo -u portico-infinity-exec cat \
             "/opt/infinity-e2e-$INFINITY_RUN_ID/real-filecopy-recovery-job.id")"
           [[ "$JOB_ID" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]
           UNIT="$JOB_ID.service"
           sudo systemctl kill --kill-whom=main --signal=STOP "$UNIT"
-          # A stopped process stays loaded and activating, NOT completed.
           before="$(sudo systemctl show "$UNIT" --no-pager \
             --property=LoadState,ActiveState,SubState)"
-          grep -q '^LoadState=loaded
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /srv/portico-infinity
-          sudo python3 scripts/infinity-emergency-stop.py --execute
-          if curl --connect-timeout 2 -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-            echo 'E2E FAILURE: Gateway remained online after owner emergency stop' >&2
-            exit 1
-          fi
-          # Restart only the scoped Infinity project, check persisted policy.
-          sudo docker compose -p portico-infinity up -d broker gateway
-          ready=0
-          for attempt in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" = 1
-          sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-          echo 'INFINITY REAL DOCKER E2E COMPLETE: scoped controller, operations, audit, stop and restart'
-
-      - name: Upload nonsecret lab evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: infinity-real-docker-e2e-${{ github.run_id }}
-          path: ${{ runner.temp }}/infinity-real-docker-evidence.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Cleanup only this ephemeral Infinity project
-        if: always()
-        shell: bash
-        env:
-          INFINITY_RUN_ID: ${{ github.run_id }}
-        run: |
-          set +e
-          # Unfreeze only the validated disposable job from this CI run;
-          # otherwise systemd stop could block on a paused test worker.
-          if [[ "${INFINITY_RUN_ID:-}" =~ ^[0-9]{1,24}$ ]] &&
-             [ -f "/opt/infinity-e2e-${INFINITY_RUN_ID}/real-filecopy-recovery-job.id" ]; then
-            RECOVERY_JOB="$(sudo cat "/opt/infinity-e2e-${INFINITY_RUN_ID}/real-filecopy-recovery-job.id")"
-            if [[ "$RECOVERY_JOB" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]; then
-              sudo systemctl kill --kill-whom=main --signal=CONT "$RECOVERY_JOB.service" || true
-              sudo systemctl stop "$RECOVERY_JOB.service" || true
-            fi
-          fi
-          if [ -d /srv/portico-infinity ]; then
-            cd /srv/portico-infinity
-            sudo docker compose -p portico-infinity down --remove-orphans
-          fi
-          # The isolated runner alone staged this host binary.
-          if [ -f /usr/local/libexec/portico-infinity/portico-filecopy-worker ]; then
-            sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
-            sudo rmdir /usr/local/libexec/portico-infinity 2>/dev/null || true
-          fi
-          if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
-            sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}" 2>/dev/null || true
-          fi
- <<<"$before"
-          grep -q '^ActiveState=activating
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /srv/portico-infinity
-          sudo python3 scripts/infinity-emergency-stop.py --execute
-          if curl --connect-timeout 2 -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-            echo 'E2E FAILURE: Gateway remained online after owner emergency stop' >&2
-            exit 1
-          fi
-          # Restart only the scoped Infinity project, check persisted policy.
-          sudo docker compose -p portico-infinity up -d broker gateway
-          ready=0
-          for attempt in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" = 1
-          sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-          echo 'INFINITY REAL DOCKER E2E COMPLETE: scoped controller, operations, audit, stop and restart'
-
-      - name: Upload nonsecret lab evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: infinity-real-docker-e2e-${{ github.run_id }}
-          path: ${{ runner.temp }}/infinity-real-docker-evidence.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Cleanup only this ephemeral Infinity project
-        if: always()
-        shell: bash
-        env:
-          INFINITY_RUN_ID: ${{ github.run_id }}
-        run: |
-          set +e
-          if [ -d /srv/portico-infinity ]; then
-            cd /srv/portico-infinity
-            sudo docker compose -p portico-infinity down --remove-orphans
-          fi
-          # The isolated runner alone staged this host binary.
-          if [ -f /usr/local/libexec/portico-infinity/portico-filecopy-worker ]; then
-            sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
-            sudo rmdir /usr/local/libexec/portico-infinity 2>/dev/null || true
-          fi
-          if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
-            sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}" 2>/dev/null || true
-          fi
- <<<"$before"
+          grep -q '^LoadState=loaded$' <<<"$before"
+          grep -q '^ActiveState=activating$' <<<"$before"
 
           cd /srv/portico-infinity
           sudo docker compose -p portico-infinity stop broker
           during="$(sudo systemctl show "$UNIT" --no-pager \
             --property=LoadState,ActiveState)"
-          grep -q '^LoadState=loaded
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /srv/portico-infinity
-          sudo python3 scripts/infinity-emergency-stop.py --execute
-          if curl --connect-timeout 2 -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-            echo 'E2E FAILURE: Gateway remained online after owner emergency stop' >&2
-            exit 1
-          fi
-          # Restart only the scoped Infinity project, check persisted policy.
-          sudo docker compose -p portico-infinity up -d broker gateway
-          ready=0
-          for attempt in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" = 1
-          sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-          echo 'INFINITY REAL DOCKER E2E COMPLETE: scoped controller, operations, audit, stop and restart'
-
-      - name: Upload nonsecret lab evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: infinity-real-docker-e2e-${{ github.run_id }}
-          path: ${{ runner.temp }}/infinity-real-docker-evidence.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Cleanup only this ephemeral Infinity project
-        if: always()
-        shell: bash
-        env:
-          INFINITY_RUN_ID: ${{ github.run_id }}
-        run: |
-          set +e
-          if [ -d /srv/portico-infinity ]; then
-            cd /srv/portico-infinity
-            sudo docker compose -p portico-infinity down --remove-orphans
-          fi
-          # The isolated runner alone staged this host binary.
-          if [ -f /usr/local/libexec/portico-infinity/portico-filecopy-worker ]; then
-            sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
-            sudo rmdir /usr/local/libexec/portico-infinity 2>/dev/null || true
-          fi
-          if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
-            sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}" 2>/dev/null || true
-          fi
- <<<"$during"
-          grep -q '^ActiveState=activating
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /srv/portico-infinity
-          sudo python3 scripts/infinity-emergency-stop.py --execute
-          if curl --connect-timeout 2 -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-            echo 'E2E FAILURE: Gateway remained online after owner emergency stop' >&2
-            exit 1
-          fi
-          # Restart only the scoped Infinity project, check persisted policy.
-          sudo docker compose -p portico-infinity up -d broker gateway
-          ready=0
-          for attempt in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" = 1
-          sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-          echo 'INFINITY REAL DOCKER E2E COMPLETE: scoped controller, operations, audit, stop and restart'
-
-      - name: Upload nonsecret lab evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: infinity-real-docker-e2e-${{ github.run_id }}
-          path: ${{ runner.temp }}/infinity-real-docker-evidence.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Cleanup only this ephemeral Infinity project
-        if: always()
-        shell: bash
-        env:
-          INFINITY_RUN_ID: ${{ github.run_id }}
-        run: |
-          set +e
-          if [ -d /srv/portico-infinity ]; then
-            cd /srv/portico-infinity
-            sudo docker compose -p portico-infinity down --remove-orphans
-          fi
-          # The isolated runner alone staged this host binary.
-          if [ -f /usr/local/libexec/portico-infinity/portico-filecopy-worker ]; then
-            sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
-            sudo rmdir /usr/local/libexec/portico-infinity 2>/dev/null || true
-          fi
-          if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
-            sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}" 2>/dev/null || true
-          fi
- <<<"$during"
+          grep -q '^LoadState=loaded$' <<<"$during"
+          grep -q '^ActiveState=activating$' <<<"$during"
           echo "SYSTEMD_WORKER_SURVIVED_BROKER_STOP: PASS"
           sudo docker compose -p portico-infinity up -d broker
           ready=0
@@ -472,8 +251,6 @@ jobs:
           test "$ready" = 1
           cd "$GITHUB_WORKSPACE"
           "$RUNNER_TEMP/filecopy-recovery-probe" -phase check
-          # Unfreeze only after verifying the restarted Broker sees the
-          # still-running worker and its original operation journal.
           sudo systemctl kill --kill-whom=main --signal=CONT "$UNIT"
           "$RUNNER_TEMP/filecopy-recovery-probe" -phase cancel
 
@@ -517,6 +294,15 @@ jobs:
           INFINITY_RUN_ID: ${{ github.run_id }}
         run: |
           set +e
+          # Unfreeze only the synthetic unit owned by this disposable run.
+          if [[ "${INFINITY_RUN_ID:-}" =~ ^[0-9]{1,24}$ ]] &&
+             [ -f "/opt/infinity-e2e-${INFINITY_RUN_ID}/real-filecopy-recovery-job.id" ]; then
+            RECOVERY_JOB="$(sudo cat "/opt/infinity-e2e-${INFINITY_RUN_ID}/real-filecopy-recovery-job.id")"
+            if [[ "$RECOVERY_JOB" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]; then
+              sudo systemctl kill --kill-whom=main --signal=CONT "$RECOVERY_JOB.service" || true
+              sudo systemctl stop "$RECOVERY_JOB.service" || true
+            fi
+          fi
           if [ -d /srv/portico-infinity ]; then
             cd /srv/portico-infinity
             sudo docker compose -p portico-infinity down --remove-orphans
