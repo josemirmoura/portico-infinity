@@ -303,7 +303,19 @@ jobs:
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "token=$ACCESS_TOKEN" \
             --data-urlencode 'token_type_hint=access_token' \
+            --no-fail --write-out '\n__PORTICO_HTTP_STATUS__%{http_code}' \
             >/tmp/probe-revoked-response.txt
+          python3 - <<'PY'
+          import json
+          raw=open('/tmp/probe-revoked-response.txt').read()
+          body,status=raw.rsplit('\n__PORTICO_HTTP_STATUS__',1)
+          try:
+              error=json.loads(body).get('error', '(none)')
+          except (ValueError,AttributeError):
+              error='(non-json)'
+          print('ZITADEL REVOKE HTTP:', status.strip(), 'error code:', error)
+          assert status.strip()=='200', 'revoke must return 200'
+          PY
           curl_ci -X POST http://zitadel-api:8080/oauth/v2/introspect \
             -u "$INTROSPECTION_CLIENT_ID:$INTROSPECTION_CLIENT_SECRET" \
             -H 'Content-Type: application/x-www-form-urlencoded' \
