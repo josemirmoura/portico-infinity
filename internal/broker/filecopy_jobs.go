@@ -198,7 +198,20 @@ func (b *Broker) startFilecopy(ctx context.Context, req wire.Request) wire.Respo
     case state.OperationConflict:
         return deny(req.ID,"idempotency_conflict","operation id reused with different filecopy")
     case state.OperationReconcile:
-        return deny(req.ID,"reconcile_required","prior filecopy dispatch outcome uncertain")
+        // The acknowledgement can be lost after systemd accepted the job.
+        // Return its deterministic ID for safe status inspection, never
+        // dispatch another unit or claim the operation completed.
+        existing, lookupErr := b.State.GetJob(ctx, manifest.JobID)
+        if lookupErr == nil && existing.Subject == req.Subject &&
+            existing.Tool == req.Tool &&
+            filepath.Clean(existing.Resource) == filepath.Clean(in.Destination) {
+            return ok(req.ID, map[string]any{
+                "job_id":manifest.JobID, "state":existing.State,
+                "recovered":true, "reconcile_required":true,
+                "status_tool":"job.status",
+            })
+        }
+        return deny(req.ID,"reconcile_required","prior filecopy dispatch outcome uncertain; operator reconciliation required")
     }
     abortBeforeDispatch := func() { _ = b.State.AbortOperation(context.Background(), req.InvocationID) }
     active, err := b.State.ListActiveJobs(ctx)
