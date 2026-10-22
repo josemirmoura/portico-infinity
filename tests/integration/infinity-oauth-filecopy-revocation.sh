@@ -209,7 +209,10 @@ if ! sudo test -f "$STATE/$marker"; then
   echo "operator revocation fence was not persisted" >&2
   exit 1
 fi
-sudo systemctl kill --kill-whom=main --signal=CONT "$UNIT"
+# systemctl stop may have already completed while the unit was frozen.
+# A missing MainPID is benign ONLY if the mandatory durable checkpoint below
+# proves cancelled and the destination was never published.
+sudo systemctl kill --kill-whom=main --signal=CONT "$UNIT" >/dev/null 2>&1 || true
 if ! wait "$operator_pid"; then
   cat "$OPERATOR_LOG" >&2
   exit 1
