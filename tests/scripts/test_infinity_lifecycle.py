@@ -179,7 +179,7 @@ class InfinityLifecycleTests(unittest.TestCase):
                 self.assertTrue(any(
                     cmd[0] == "systemctl" and
                     "vps-agent-filecopy-*.service" in cmd and
-                    "--state=active,activating,deactivating,reloading" in cmd
+                    "--state=active,activating,deactivating,reloading,failed" in cmd
                     for cmd in host.calls
                 ))
 
