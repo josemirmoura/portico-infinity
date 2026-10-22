@@ -6,6 +6,10 @@
 
 [English](README.md) · [Community](https://github.com/josemirmoura/portico-community)
 
+### Para retomar o desenvolvimento com uma IA
+
+Diga **"Leia o GitHub do Pórtico Infinity e siga o que foi comandado."** A IA deve começar por **[AGENTS.md](AGENTS.md)** e pelo **[Plano mestre de execução e aceite v1.0](docs/infinity/AI-EXECUTION-PLAN.md)**, consultar as issues e prosseguir sem pedir um novo briefing. **O lançamento depende de teste e GO explícito do proprietário.**
+
 ## Objetivo
 
 O proprietário poderá autorizar **uma única vez**, sem prazo de expiração:
