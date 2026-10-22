@@ -1,0 +1,40 @@
+name: infinity-filecopy-multigib-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'internal/filecopyworker/**'
+      - 'internal/securefs/large_copy.go'
+      - '.github/workflows/infinity-filecopy-multigib-disposable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-multigib:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      INFINITY_MULTIGIB_E2E: '1'
+      GOMEMLIMIT: 512MiB
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify disposable runner and available disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          df -h /tmp
+          available="$(df -B1 --output=avail /tmp | tail -1 | tr -d ' ')"
+          test "$available" -ge 5368709120
+      - name: Worker end-to-end on >2 GiB sparse input, integrity, cancel and replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          go test -count=1 -timeout=12m -v -run '^TestWorker(MultiGiBSparseCopy|LargeSparseCancellation)$' ./internal/filecopyworker
