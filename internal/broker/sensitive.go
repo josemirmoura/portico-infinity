@@ -138,7 +138,7 @@ func (b *Broker) guardSensitiveRequest(ctx context.Context, req wire.Request) *w
 				return &resp
 			}
 		}
-	case "file.copy", "file.move":
+	case "file.copy", "file.move", "file.copy.start":
 		var in struct {
 			Destination string `json:"destination"`
 		}

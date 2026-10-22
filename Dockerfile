@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent-gateway ./cmd/vps-agent-gateway &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent-broker ./cmd/vps-agent-broker &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent ./cmd/vps-agent &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent-mcp-call ./cmd/vps-agent-mcp-call &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/portico-cloud-node ./cmd/portico-cloud-node
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent-gateway ./cmd/vps-agent-gateway &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent-broker ./cmd/vps-agent-broker &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent ./cmd/vps-agent &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vps-agent-mcp-call ./cmd/vps-agent-mcp-call &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/portico-cloud-node ./cmd/portico-cloud-node &&     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/portico-filecopy-worker ./cmd/portico-filecopy-worker
 
 FROM debian:bookworm-slim AS gateway
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/* &&     groupadd --gid 65532 vps-agent && useradd --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin vps-agent
@@ -30,5 +30,7 @@ FROM debian:bookworm-slim AS broker
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates coreutils util-linux && rm -rf /var/lib/apt/lists/* &&     groupadd --gid 65532 vps-agent
 COPY --from=build /out/vps-agent-broker /usr/local/bin/vps-agent-broker
 COPY --from=build /out/vps-agent /usr/local/bin/vps-agent
+# Operator-only extraction into protected host libexec; NOT directly callable by MCP.
+COPY --from=build /out/portico-filecopy-worker /usr/local/bin/portico-filecopy-worker
 USER 0:65532
 ENTRYPOINT ["/usr/local/bin/vps-agent-broker"]

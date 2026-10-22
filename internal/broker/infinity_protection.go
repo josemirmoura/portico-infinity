@@ -59,7 +59,7 @@ func guardInfinityControlPath(req wire.Request) *wire.Response {
     case "file.move":
         paths = []string{req.Resource}
         fallthrough
-    case "file.copy":
+    case "file.copy", "file.copy.start":
         var args struct {
             Destination string `json:"destination"`
         }

@@ -49,7 +49,7 @@ func toolSafetyFor(name string) (toolSafety, bool) {
 	// Filesystem changes.
 	case "file.mkdir":
 		return safety(false, false, true, false), true
-	case "file.write_test", "file.write", "file.copy", "file.chmod", "file.chown":
+	case "file.write_test", "file.write", "file.copy", "file.copy.start", "file.chmod", "file.chown":
 		return safety(false, true, true, false), true
 	case "file.patch", "file.move", "file.remove":
 		return safety(false, true, false, false), true

@@ -150,6 +150,14 @@ type fileDestinationInput struct {
 	OperationID string `json:"operation_id,omitempty"`
 }
 
+type fileCopyStartInput struct {
+    Path string `json:"path"`
+    Destination string `json:"destination"`
+    MaxBytes int64 `json:"max_bytes" jsonschema:"maximum allowed source size in bytes; capped by operator"`
+    ExpectedSHA256 string `json:"expected_sha256,omitempty" jsonschema:"optional 64-character hexadecimal SHA-256"`
+    OperationID string `json:"operation_id" jsonschema:"required stable idempotency key"`
+}
+
 type fileRemoveInput struct {
 	Path        string `json:"path"`
 	Recursive   bool   `json:"recursive,omitempty"`
@@ -437,6 +445,20 @@ func newMCPServer(exec Executor, metrics *runtimeMetrics) *mcp.Server {
 			}
 			return nil, out, nil
 		})
+
+	mcp.AddTool(server, annotatedTool("file.copy.start", "Start an operator-enabled, durable binary copy under /opt and return its job_id. No shell commands or file bytes."), 
+        func(ctx context.Context, _ *mcp.CallToolRequest, in fileCopyStartInput) (*mcp.CallToolResult, map[string]any, error) {
+            var out map[string]any
+            if in.OperationID == "" { return nil, out, errors.New("stable operation_id is required for binary copy") }
+            args, _ := json.Marshal(map[string]any{
+                "destination": in.Destination, "max_bytes": in.MaxBytes,
+                "expected_sha256": in.ExpectedSHA256,
+            })
+            if err := s.call(ctx, "file.copy.start", in.Path, "start", args, &out, true, in.OperationID); err != nil {
+                return nil, out, err
+            }
+            return nil, out, nil
+        })
 
 	mcp.AddTool(server, annotatedTool("file.move", "Move or rename an authorized path within writable scope."),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in fileDestinationInput) (*mcp.CallToolResult, map[string]any, error) {
