@@ -22,9 +22,10 @@ func TestBinaryStreamAtomicSHAAndProgress(t *testing.T) {
 	wantHash := sha256.Sum256(content)
 	want := hex.EncodeToString(wantHash[:])
 	var last int64
-	hash, err := m.CopyFileStream(context.Background(), src, dst, 1<<30, want, func(done, total int64) {
+	hash, err := m.CopyFileStream(context.Background(), src, dst, 1<<30, want, func(done, total int64) error {
 		if done < last || total != int64(len(content)) { t.Errorf("bad copy progress %d/%d", done, total) }
 		last = done
+		return nil
 	})
 	if err != nil { t.Fatal(err) }
 	if hash != want || last != int64(len(content)) { t.Fatalf("hash/progress mismatch: %s %d", hash, last) }
@@ -57,8 +58,9 @@ func TestBinaryStreamDenyOverwriteMismatchAndCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := m.CopyFileStream(ctx, src, dst, 1<<30, "", func(done, _ int64) {
+	if _, err := m.CopyFileStream(ctx, src, dst, 1<<30, "", func(done, _ int64) error {
 		if done >= 1<<20 { cancel() }
+		return nil
 	}); !errors.Is(err, context.Canceled) { t.Fatalf("cancel must stop copy: %v", err) }
 	if _, err := os.Stat(dst); !errors.Is(err, os.ErrNotExist) { t.Fatal("cancel published destination") }
 	if _, err := m.CopyFileStream(context.Background(), src, dst, 1, "", nil); err == nil {
