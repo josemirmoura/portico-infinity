@@ -1,0 +1,98 @@
+name: infinity-lifecycle-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-lifecycle.py'
+      - 'tests/scripts/test_infinity_lifecycle.py'
+      - '.github/workflows/infinity-lifecycle-disposable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run non-destructive lifecycle regressions
+        run: python3 -m unittest -v tests/scripts/test_infinity_lifecycle.py
+
+      - name: Build isolated synthetic Infinity fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test ! -e /srv/portico-infinity
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          sudo install -d -o root -g root -m 0755 /srv/portico-infinity/scripts
+          sudo install -o root -g root -m 0644 scripts/infinity-lifecycle.py \
+            /srv/portico-infinity/scripts/infinity-lifecycle.py
+          sudo tee /srv/portico-infinity/compose.yaml >/dev/null <<'YAML'
+          name: portico-infinity
+          services:
+            gateway:
+              image: alpine:3.21
+              command: ["sleep", "3600"]
+            broker:
+              image: alpine:3.21
+              command: ["sleep", "3600"]
+            zitadel-api:
+              image: alpine:3.21
+              command: ["sleep", "3600"]
+              networks:
+                - default
+                - integrated-auth
+              volumes:
+                - zitadel-postgres-data:/var/lib/infinity-fixture
+          networks:
+            integrated-auth:
+          volumes:
+            zitadel-postgres-data:
+          YAML
+          sudo chown root:root /srv/portico-infinity/compose.yaml
+          cd /srv/portico-infinity
+          sudo docker compose -p portico-infinity up -d
+          docker run -d --name unrelated-lifecycle-e2e alpine:3.21 sleep 3600
+          test -n "$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          test -n "$(docker ps -q --filter name=unrelated-lifecycle-e2e)"
+
+      - name: Prove inventory, reversible deactivation and runtime uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /srv/portico-infinity
+          sudo python3 scripts/infinity-lifecycle.py --dry-run
+          test -n "$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          sudo python3 scripts/infinity-lifecycle.py \
+            --deactivate --confirm DEACTIVATE-INFINITY
+          test -z "$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          test -n "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          test -n "$(docker ps -q --filter name=unrelated-lifecycle-e2e)"
+          sudo docker compose -p portico-infinity up -d
+          test -n "$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          sudo python3 scripts/infinity-lifecycle.py \
+            --uninstall-runtime --confirm UNINSTALL-INFINITY-RUNTIME
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          test -z "$(docker network ls --filter label=com.docker.compose.project=portico-infinity --format '{{.ID}}')"
+          docker volume inspect portico-infinity_zitadel-postgres-data >/dev/null
+          test -n "$(docker ps -q --filter name=unrelated-lifecycle-e2e)"
+          test -d /srv/portico-infinity
+          sudo python3 scripts/infinity-lifecycle.py \
+            --uninstall-runtime --confirm UNINSTALL-INFINITY-RUNTIME
+          echo 'INFINITY DISPOSABLE LIFECYCLE PASS: isolated, reversible, data-preserving'
+
+      - name: Clean only the synthetic runner fixture
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker rm -f unrelated-lifecycle-e2e >/dev/null 2>&1 || true
+          if [ -d /srv/portico-infinity ]; then
+            cd /srv/portico-infinity
+            sudo docker compose -p portico-infinity down -v --remove-orphans >/dev/null 2>&1 || true
+            sudo docker volume rm portico-infinity_zitadel-postgres-data >/dev/null 2>&1 || true
+            sudo rm -rf /srv/portico-infinity
+          fi
