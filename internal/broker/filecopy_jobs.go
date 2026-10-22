@@ -45,6 +45,20 @@ func filecopyOperatorQuota() int64 {
 }
 
 func verifyHostFilecopyBinary() error {
+    // A root-owned executable is not trustworthy when an unprivileged user
+    // can replace it through a writable/symlinked ancestor directory.
+    for _, ancestor := range []string{
+        "/usr", "/usr/local", "/usr/local/libexec",
+        "/usr/local/libexec/portico-infinity",
+    } {
+        info, err := os.Lstat(hostexec.SystemPath(ancestor))
+        if err != nil { return fmt.Errorf("unsafe host worker ancestor: %w", err) }
+        st, ok := info.Sys().(*syscall.Stat_t)
+        if !ok || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 ||
+            st.Uid != 0 || info.Mode().Perm()&0022 != 0 {
+            return errors.New("worker installation directory is not root-owned and protected")
+        }
+    }
     path := hostexec.SystemPath(filecopyHostBinary)
     info, err := os.Lstat(path)
     if err != nil { return fmt.Errorf("operator must install filecopy worker: %w", err) }
