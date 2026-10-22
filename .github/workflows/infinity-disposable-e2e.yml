@@ -6,6 +6,7 @@ on:
       - 'internal/broker/**'
       - 'tests/integration/infinity-docker-probe/**'
       - 'tests/integration/infinity-filecopy-mcp-probe/**'
+      - 'tests/integration/infinity-filecopy-recovery-probe/**'
       - '.github/workflows/infinity-disposable-e2e.yml'
   push:
     branches: [main]
@@ -203,6 +204,55 @@ jobs:
           sudo docker compose -p portico-infinity exec -T broker \
             /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
 
+      - name: MCP in-flight filecopy reconciles across REAL Broker restart
+        shell: bash
+        env:
+          INFINITY_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$INFINITY_RUN_ID" = "$GITHUB_RUN_ID"
+          TOKEN="$(sudo sed -n 's/^VPS_AGENT_STATIC_TOKEN=//p' /srv/portico-infinity/.env)"
+          test "${#TOKEN}" -ge 40
+          echo "::add-mask::$TOKEN"
+          export INFINITY_E2E_BEARER_TOKEN="$TOKEN"
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/filecopy-recovery-probe" \
+            ./tests/integration/infinity-filecopy-recovery-probe
+          "$RUNNER_TEMP/filecopy-recovery-probe" -phase start
+
+          JOB_ID="$(cat "$RUNNER_TEMP/real-filecopy-recovery-job.id")"
+          [[ "$JOB_ID" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]
+          UNIT="$JOB_ID.service"
+          sudo systemctl kill --kill-whom=main --signal=STOP "$UNIT"
+          before="$(sudo systemctl show "$UNIT" --no-pager \
+            --property=LoadState,ActiveState,SubState)"
+          grep -q '^LoadState=loaded$' <<<"$before"
+          grep -q '^ActiveState=activating$' <<<"$before"
+
+          cd /srv/portico-infinity
+          sudo docker compose -p portico-infinity stop broker
+          during="$(sudo systemctl show "$UNIT" --no-pager \
+            --property=LoadState,ActiveState)"
+          grep -q '^LoadState=loaded$' <<<"$during"
+          grep -q '^ActiveState=activating$' <<<"$during"
+          echo "SYSTEMD_WORKER_SURVIVED_BROKER_STOP: PASS"
+          sudo docker compose -p portico-infinity up -d broker
+          ready=0
+          for attempt in $(seq 1 40); do
+            if [ "$(sudo docker inspect -f '{{.State.Health.Status}}' \
+                portico-infinity-broker-1 2>/dev/null || :)" = healthy ]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = 1
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/filecopy-recovery-probe" -phase check
+          sudo systemctl kill --kill-whom=main --signal=CONT "$UNIT"
+          "$RUNNER_TEMP/filecopy-recovery-probe" -phase cancel
+
       - name: Real emergency stop, verification and restart
         shell: bash
         run: |
@@ -243,6 +293,15 @@ jobs:
           INFINITY_RUN_ID: ${{ github.run_id }}
         run: |
           set +e
+          # Unfreeze only the synthetic unit owned by this disposable run.
+          if [[ "${INFINITY_RUN_ID:-}" =~ ^[0-9]{1,24}$ ]] &&
+             [ -f "$RUNNER_TEMP/real-filecopy-recovery-job.id" ]; then
+            RECOVERY_JOB="$(cat "$RUNNER_TEMP/real-filecopy-recovery-job.id")"
+            if [[ "$RECOVERY_JOB" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]; then
+              sudo systemctl kill --kill-whom=main --signal=CONT "$RECOVERY_JOB.service" || true
+              sudo systemctl stop "$RECOVERY_JOB.service" || true
+            fi
+          fi
           if [ -d /srv/portico-infinity ]; then
             cd /srv/portico-infinity
             sudo docker compose -p portico-infinity down --remove-orphans
