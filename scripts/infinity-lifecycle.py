@@ -92,7 +92,7 @@ def inventory(command=run) -> tuple[list[dict], list[dict], list[str]]:
                 or not isinstance(attached, dict)
                 or any(container_id not in ids for container_id in attached)):
             raise LifecycleError("unverifiable, foreign or shared Docker network")
-        networks.append({"id": ident, "name": name})
+        networks.append({"id": ident, "name": name, "attached": sorted(attached)})
 
     # Informational only. Private volumes are NEVER deleted by this tool.
     volumes = command(["docker", "volume", "ls",
@@ -112,21 +112,28 @@ def inventory(command=run) -> tuple[list[dict], list[dict], list[str]]:
 
 
 def ensure_no_active_workers(command=run) -> None:
-    output = command(["systemctl", "list-units", "--type=service",
-                      "--state=active", "--no-legend", "--no-pager",
-                      "portico-filecopy-*.service"])
-    if any("portico-filecopy-" in line and ".service" in line
-           for line in output.splitlines()):
-        raise LifecycleError("active file-copy worker: stop/reconcile it out-of-band first")
+    # Actual Infinity systemd-run job IDs use vps-agent-filecopy-<32 hex>.
+    # The earlier portico-filecopy-only probe missed running jobs and could
+    # allow the controller to stop with an independent privileged copy active.
+    # Include activating oneshots: Type=oneshot workers remain "activating"
+    # until the binary exits. A retained active/exited unit is conservatively
+    # rejected until the operator reconciles/cleans it out of band.
+    for prefix in ("vps-agent-filecopy-", "portico-filecopy-"):
+        output = command(["systemctl", "list-units", "--type=service",
+                          "--state=active,activating,deactivating,reloading",
+                          "--no-legend", "--no-pager", "--full",
+                          prefix + "*.service"])
+        if any(prefix in line and ".service" in line for line in output.splitlines()):
+            raise LifecycleError("active file-copy worker: stop/reconcile it out-of-band first")
 
 
 def change_runtime(action: str, command=run) -> tuple[int, int]:
     # All safety checks complete before the first mutation.
-    containers, networks, _ = inventory(command)
+    containers, networks, volumes = inventory(command)
     ensure_no_active_workers(command)
-    same, _, _ = inventory(command)
-    if same != containers:
-        raise LifecycleError("container set changed during preflight")
+    ensure_no_active_workers(command)
+    if inventory(command) != (containers, networks, volumes):
+        raise LifecycleError("runtime inventory changed during preflight")
     for item in containers:
         ident = item["id"]
         command(["docker", "update", "--restart=no", ident])
