@@ -89,4 +89,64 @@ func main(){
  if e!=nil||denied==nil||!denied.IsError{panic("outside-scope request was not denied")}
  if _,e=os.Lstat("/etc/portico-infinity-should-not-exist");!os.IsNotExist(e){panic("wrote outside scope")}
  fmt.Println("MCP_FILECOPY_OUTSIDE_ROOT_DENIED: PASS")
+
+ // Independent, long, sparse synthetic file to exercise cancellation through
+ // the *MCP job.cancel tool*, not through an operator shell on the host.
+ sourceLeaf:="real-filecopy-cancel-source.gguf"
+ cancelledLeaf:="real-filecopy-cancel-destination.gguf"
+ sparse,e:=root.OpenFile(sourceLeaf,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if e!=nil{panic(e)}
+ if e=sparse.Truncate(8<<30);e!=nil{_ = sparse.Close();panic(e)}
+ if e=sparse.Close();e!=nil{panic(e)}
+ if _,e=root.Stat(cancelledLeaf);!os.IsNotExist(e){panic("cancel destination exists")}
+ cancelArgs:=map[string]any{"path":filepath.Join(dir,sourceLeaf),
+  "destination":filepath.Join(dir,cancelledLeaf),"max_bytes":int64(9<<30),
+  "operation_id":"infinity-mcp-filecopy-cancel-"+run}
+ cr,e:=call("file.copy.start",cancelArgs);if e!=nil{panic(e)}
+ cjob,e:=decoded(cr);if e!=nil{panic(e)}
+ cancelID,ok:=cjob["job_id"].(string)
+ if !ok||!strings.HasPrefix(cancelID,"vps-agent-filecopy-"){panic("bad cancel job id")}
+ var before map[string]any
+ for until:=time.Now().Add(80*time.Second);time.Now().Before(until);{
+  r,err:=call("job.status",map[string]any{"job_id":cancelID})
+  if err==nil{
+   p,de:=decoded(r);if de==nil{
+    before=p
+    phase,_:=p["state"].(string)
+    bytes,_:=p["bytes_done"].(float64)
+    if bytes>=float64(64<<20) && phase=="running"{break}
+    if phase=="done"||phase=="failed"||phase=="cancelled"{
+     panic(fmt.Errorf("long copy terminated before cancel: %v",p))
+    }
+   }
+  }
+  time.Sleep(100*time.Millisecond)
+ }
+ if before==nil{panic("no long copy progress")}
+ doneBytes,_:=before["bytes_done"].(float64)
+ if doneBytes<float64(64<<20){panic(fmt.Errorf("progress checkpoint missing: %v",before))}
+ stopped,e:=call("job.cancel",map[string]any{"job_id":cancelID})
+ if e!=nil{panic(e)}
+ cancelResult,e:=decoded(stopped);if e!=nil{panic(fmt.Errorf("cancel MCP denied: %w",e))}
+ if cancelResult["cancelled"]!=true{panic(fmt.Errorf("cancel not confirmed: %v",cancelResult))}
+ var cancelled map[string]any
+ for until:=time.Now().Add(30*time.Second);time.Now().Before(until);{
+  r,err:=call("job.status",map[string]any{"job_id":cancelID})
+  if err==nil{
+   p,de:=decoded(r);if de==nil{
+    cancelled=p
+    if p["state"]=="cancelled"{break}
+   }
+  }
+  time.Sleep(100*time.Millisecond)
+ }
+ if cancelled==nil||cancelled["state"]!="cancelled"{
+  panic(fmt.Errorf("durable cancel phase not confirmed: %v",cancelled))
+ }
+ if _,e=root.Stat(cancelledLeaf);!os.IsNotExist(e){panic("cancelled MCP job published destination")}
+ re,e:=call("file.copy.start",cancelArgs);if e!=nil{panic(e)}
+ cached,e:=decoded(re);if e!=nil||cached["job_id"]!=cancelID{panic("cancelled operation retried")}
+ if _,e=root.Stat(cancelledLeaf);!os.IsNotExist(e){panic("cancel replay published destination")}
+ fmt.Println("MCP_FILECOPY_INFLIGHT_CANCEL_AND_SAFE_REPLAY: PASS")
 }
+
