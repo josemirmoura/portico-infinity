@@ -167,6 +167,13 @@ func (b *Broker) startFilecopy(ctx context.Context, req wire.Request) wire.Respo
     if err := manifest.Validate(manifest.JobID); err != nil {
         return deny(req.ID, "invalid_args", err.Error())
     }
+    revoked, revocationErr := filecopyworker.IsSubjectRevoked(filecopyBrokerState, req.Subject)
+    if revocationErr != nil {
+        return deny(req.ID, "reconcile_required", "operator-owned revocation fence unavailable; no filecopy dispatched")
+    }
+    if revoked {
+        return deny(req.ID, "permission_denied", "subject's binary filecopy permission was revoked by operator")
+    }
     readRoots, writeRoots, err := b.effectiveFileRoots(ctx, req.Subject)
     if err != nil { return deny(req.ID, "filesystem_unavailable", err.Error()) }
     if !pathWithinAnyRoot(readRoots, req.Resource) || !pathWithinAnyRoot(writeRoots, in.Destination) {
