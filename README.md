@@ -6,6 +6,10 @@
 
 [Português (Brasil)](README.pt-BR.md) · [Community repository](https://github.com/josemirmoura/portico-community)
 
+### Resume development with an AI
+
+Ask: **"Read the Portico Infinity GitHub and follow the recorded instructions."** Start with **[AGENTS.md](AGENTS.md)** and the **[canonical v1.0 execution plan](docs/infinity/EXECUTION_PLAN.md)**, review current issues/PRs/CI, and resume verified pending work. **A stable v1.0 release requires the owner's personal UAT and explicit GO.**
+
 ## Target
 
 - Operator-owned, opt-in, **non-expiring** authorization for read/write and ordinary work inside `/opt`.
