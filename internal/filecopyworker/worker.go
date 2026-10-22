@@ -39,6 +39,7 @@ type Manifest struct {
     Destination string `json:"destination"`
     ExpectedSHA256 string `json:"expected_sha256,omitempty"`
     MaxBytes int64 `json:"max_bytes"`
+    ScopeRoot string `json:"scope_root,omitempty"` // operator-controlled, never from MCP input
 }
 
 type Progress struct {
@@ -52,14 +53,34 @@ type Progress struct {
 
 func ValidID(id string) bool { return jobPattern.MatchString(id) }
 
-func allowedOptPath(path string) bool {
-    if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/opt" {
+var safeScopePattern = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
+
+func validWorkerScope(root string) bool {
+    if root == "/" || root == "" || !filepath.IsAbs(root) ||
+        filepath.Clean(root) != root || !safeScopePattern.MatchString(root) {
         return false
     }
-    if !strings.HasPrefix(path, "/opt/") {
+    for _, reserved := range []string{
+        "/srv", "/etc", "/usr", "/var", "/root", "/proc", "/sys", "/dev",
+        "/run", "/boot", "/home", "/tmp", "/bin", "/sbin", "/lib", "/lib64",
+    } {
+        if root == reserved || strings.HasPrefix(root, reserved+"/") { return false }
+    }
+    return true
+}
+
+func (m Manifest) selectedScope() string {
+    if m.ScopeRoot == "" { return "/opt" } // Backward compatibility for existing manifests
+    return m.ScopeRoot
+}
+
+func allowedScopedPath(root, path string) bool {
+    if !validWorkerScope(root) || !filepath.IsAbs(path) ||
+        filepath.Clean(path) != path || path == root ||
+        !strings.HasPrefix(path, root+"/") {
         return false
     }
-    for _, part := range strings.Split(strings.TrimPrefix(path, "/opt/"), "/") {
+    for _, part := range strings.Split(strings.TrimPrefix(path, root+"/"), "/") {
         if part == "" || part == "." || part == ".." {
             return false
         }
@@ -77,8 +98,9 @@ func (m Manifest) Validate(id string) error {
     if len(m.Subject) == 0 || len(m.Subject) > MaxSubjectBytes {
         return errors.New("invalid filecopy owner identity")
     }
-    if !allowedOptPath(m.Source) || !allowedOptPath(m.Destination) {
-        return errors.New("filecopy paths must be clean, nonsensitive and below /opt")
+    root := m.selectedScope()
+    if !allowedScopedPath(root, m.Source) || !allowedScopedPath(root, m.Destination) {
+        return errors.New("filecopy paths must be clean, nonsensitive and below selected scope")
     }
     if m.Source == m.Destination {
         return errors.New("filecopy source must differ from destination")
@@ -227,7 +249,8 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
     }
     if err := progressRoot.Close(); err != nil { return "", err }
     if err := status(dir, id, "running", 0, 0, ""); err != nil { return "", err }
-    fs, err := securefs.NewWithHostRoot([]string{"/opt"}, []string{"/opt"}, securefs.DefaultMaxBytes, hostRoot)
+    selected := manifest.selectedScope()
+    fs, err := securefs.NewWithHostRoot([]string{selected}, []string{selected}, securefs.DefaultMaxBytes, hostRoot)
     if err != nil { return "", err }
     var lastDone, lastTotal, recorded int64
     lastReport := time.Now()

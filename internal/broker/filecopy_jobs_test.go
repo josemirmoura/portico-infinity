@@ -38,6 +38,16 @@ func TestFilecopyDisabledWithoutIndependentOperatorOptIn(t *testing.T) {
     if filecopyOperatorQuota() != 0 { t.Fatal("oversized quota must disable worker") }
 }
 
+func TestFilecopyDispatchRejectsUnsafeOperatorScopeBeforeHostWork(t *testing.T) {
+    id := filecopyID("operator", "scope-check")
+    for _, root := range []string{"/", "/etc", "/srv", "/var/lib", "/mnt/../etc", "/mnt/"} {
+        err := dispatchFilecopyUnit(context.Background(), id, root)
+        if err == nil || !strings.Contains(err.Error(), "unsafe physical scope") {
+            t.Fatalf("operator-scope bypass for %q: %v", root, err)
+        }
+    }
+}
+
 func TestWorkerUnitIDRequiresExactPrefixAndHex(t *testing.T) {
     a:=filecopyID("alice","op")
     for _, bad := range []string{"/", "portico-infinity.service", "vps-agent-filecopy-123",

@@ -103,8 +103,13 @@ func persistFilecopyManifest(m filecopyworker.Manifest) error {
     return nil
 }
 
-func dispatchFilecopyUnit(ctx context.Context, id string) error {
+func dispatchFilecopyUnit(ctx context.Context, id, root string) error {
     if !filecopyworker.ValidID(id) { return errors.New("invalid filecopy unit identity") }
+    // Root is derived only from the operator-owned broker environment.
+    // Revalidate before interpolating into a typed systemd property.
+    probe := filecopyworker.Manifest{JobID:id, Subject:"operator", ScopeRoot:root,
+        Source:root+"/filecopy-source", Destination:root+"/filecopy-destination", MaxBytes:1}
+    if err := probe.Validate(id); err != nil { return errors.New("unsafe physical scope for filecopy dispatch") }
     if err := verifyHostFilecopyBinary(); err != nil { return err }
     args := []string{
         "--unit="+id, "--no-block", "--quiet",
@@ -117,7 +122,7 @@ func dispatchFilecopyUnit(ctx context.Context, id string) error {
         "--property=MemoryMax=1073741824",
         "--property=TasksMax=64",
         "--property=ProtectSystem=strict",
-        "--property=ReadWritePaths=/opt "+filecopyworker.StateDir,
+        "--property=ReadWritePaths="+root+" "+filecopyworker.StateDir,
         "--property=ProtectHome=yes",
         "--property=PrivateDevices=yes",
         "--property=PrivateNetwork=yes",
@@ -149,10 +154,15 @@ func (b *Broker) startFilecopy(ctx context.Context, req wire.Request) wire.Respo
     if in.MaxBytes <= 0 || in.MaxBytes > quota {
         return deny(req.ID, "quota_denied", "filecopy quota exceeds operator limit")
     }
+    selectedRoot := os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT")
+    if selectedRoot == "" {
+        return deny(req.ID, "permission_denied", "filecopy requires an operator-configured physical scope")
+    }
     manifest := filecopyworker.Manifest{
         JobID:filecopyID(req.Subject,req.InvocationID),
         Subject:req.Subject,Source:req.Resource,Destination:in.Destination,
         MaxBytes:in.MaxBytes,ExpectedSHA256:in.ExpectedSHA256,
+        ScopeRoot:selectedRoot,
     }
     if err := manifest.Validate(manifest.JobID); err != nil {
         return deny(req.ID, "invalid_args", err.Error())
@@ -187,7 +197,7 @@ func (b *Broker) startFilecopy(ctx context.Context, req wire.Request) wire.Respo
     requestHash, err := state.HashRequest(map[string]any{
         "subject":req.Subject,"tool":req.Tool,"source":req.Resource,
         "destination":in.Destination,"max_bytes":in.MaxBytes,
-        "expected_sha256":in.ExpectedSHA256,
+        "expected_sha256":in.ExpectedSHA256,"scope_root":selectedRoot,
     })
     if err != nil { return deny(req.ID, "hash_error", err.Error()) }
     decision, cached, err := b.State.BeginOperation(ctx,req.InvocationID,req.Subject,req.Tool,requestHash)
@@ -245,7 +255,7 @@ func (b *Broker) startFilecopy(ctx context.Context, req wire.Request) wire.Respo
         return deny(req.ID,"reconcile_required",
             "manifest persisted but SQLite job creation failed; operator reconciliation required")
     }
-    if err := dispatchFilecopyUnit(ctx,id); err != nil {
+    if err := dispatchFilecopyUnit(ctx,id,selectedRoot); err != nil {
         _ = b.State.UpdateJobState(context.Background(),id,"starting","dispatch acknowledgement uncertain",nil)
         return deny(req.ID,"reconcile_required","filecopy dispatch uncertain: "+err.Error())
     }

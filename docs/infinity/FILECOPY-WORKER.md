@@ -1,20 +1,28 @@
 # Infinity SCALE-001: contrato de execução durável de cópias GGUF
 
-**Implementação inicial:** [Issue #8](https://github.com/josemirmoura/portico-infinity/issues/8). Esta documentação descreve o **executável interno e seus invariantes**; **não significa que haja uma ferramenta MCP disponível**.
+**Implementação inicial:** [Issue #8](https://github.com/josemirmoura/portico-infinity/issues/8). A API MCP `file.copy.start` e o acompanhamento via `job.status`/`job.cancel` estão integrados em código, sujeitos a flag de operador e a homologação operacional ainda incompleta.
+
+## Teto físico selecionado pelo operador (evolução v1.0)
+
+Para instalações novas com escopo privilegiado alternativo, o Broker obtém o teto físico exclusivamente de `VPS_AGENT_PHYSICAL_SCOPE_ROOT` (controlado pelo operador) e persistir o valor no manifesto root-only do job como `scope_root`. O trabalhador confere que origem e destino permanecem abaixo dele, e a unidade systemd confina `ReadWritePaths` ao **mesmo teto** e ao diretório de estado root-only. A compatibilidade com manifestos anteriores sem `scope_root` usa `/opt`, mantendo jobs legítimos anteriores interpretáveis sem ampliar permissões.
+
+Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/var` e `/root`), `.env*` e caminhos de origem/destino fora do teto são recusados. O valor do root jamais é fornecido como argumento MCP. O executável instalado no host continua sob decisão independente do operador, **desabilitado até habilitação explícita** e aceite operacional.
+
+**Escopo desta implementação:** validação e testes sintéticos do motor; ainda faltam E2E multigigabyte, reinício/retomada, revogação real e teste humano. `ReadWritePaths` e raiz lógica precisam ser revistos em CI antes de habilitar feature para usuários.
 
 ## Domínios de confiança
 
 | Camada | Acesso e responsabilidade |
 |---|---|
 | ChatGPT → OAuth MCP | Solicita cópia tipada e recebe ID do job; não recebe shell, root, segredos ou bytes binários |
-| Gateway/Broker | Confirma sujeito OAuth, política de `/opt`, autorização por origem/destino, quota e intenção durável antes de despachar |
+| Gateway/Broker | Confirma sujeito OAuth, política do teto selecionado, autorização por origem/destino, quota e intenção durável antes de despachar |
 | Banco SQLite do Broker | Mantém job/subject/operation_id, início, terminalidade e referências para reconciliação |
-| Manifesto root-only em `/srv/portico-infinity/state/filecopy-jobs` | Contém campos estritos `job_id,subject,source,destination,max_bytes,expected_sha256`, com 0600 |
+| Manifesto root-only em `/srv/portico-infinity/state/filecopy-jobs` | Contém campos estritos `job_id,subject,source,destination,scope_root,max_bytes,expected_sha256`, com 0600 |
 | Executável independente `portico-filecopy-worker` | Recebe **apenas job_id**, verifica manifesto, executa `CopyFileStream`, escreve progresso e recebe SIGTERM |
 | systemd host | Controla job tipado e independente de reinício do Broker; só o operador instala/atualiza o executável |
 | Relatório de progresso root-only | `job_id.progress.json` contém fase, bytes feitos/total, SHA-256 final, horário UTC; não guarda conteúdo de arquivo |
 
-O controlador `/srv` e o futuro executável host fora de `/opt` **não são modificáveis pelo MCP**. O worker proposto tem acesso a arquivos de origem/destino exclusivamente sob `/opt`. Ele recusa caminhos fora do escopo, traversal, symlinks, hardlinks, `.env*`, origem=destino e cota inexistente/superior a 1 TiB.
+O controlador `/srv` e o executável host fora do teto selecionado **não são modificáveis pelo MCP**. O worker recebe acesso de leitura/escrita apenas ao teto fixado pelo operador para aquela instalação. Ele recusa caminhos fora do escopo, traversal, symlinks, hardlinks, `.env*`, origem=destino e cota inexistente/superior a 1 TiB.
 
 ## Ciclo do job
 
@@ -27,9 +35,11 @@ O controlador `/srv` e o futuro executável host fora de `/opt` **não são modi
 - **Cancelamento:** operação tipada do dono OAuth provoca parada da unidade; SIGTERM cancela contexto do worker, que tenta salvar estado terminal. Cancelamento pode competir com publicação, portanto requer reconciliação se resultado estiver incerto.
 - **Reinício:** estado `running` no arquivo ou unidade ausente após reboot **não** autoriza reexecutar a cópia; o operador inspeciona destino/manifesto/SQLite e decide retomar somente com protocolo futuro que confirme origem estável e checkpoint íntegro.
 
-## O que esta PR NÃO entrega
+## Estado de entrega e limitações
 
-A versão inicial do worker não registra `file.copy.start` no Gateway, não cria manifesto via Broker, não instala binário host e não integra `job.status`/cancelamento. A habilitação deve continuar desativada até que essas dependências estejam implementadas, cobertas por CI e homologadas com um projeto sintético. **Não instalar uma unidade systemd a partir deste documento sozinho.**
+O Gateway/Broker já incluem `file.copy.start` e `job.status`/`job.cancel`, manifestos duráveis e despacho systemd tipado, com recurso **desligado por padrão**. O trabalhador host instalado depende do procedimento externo do operador; uma conexão MCP pode não expor a ferramenta até atualizar seu catálogo.
+
+A transferência interrompida não possui retomada em offset comprovada: estados incertos exigem reconciliação por operador, sem reexecução cega. A v1.0 permanece bloqueada pelos E2E, pelo aceite real dos arquivos grandes e pela aprovação humana. **Não instalar uma unidade systemd a partir deste documento sozinho.**
 
 ## Aceite mínimo futuro
 
