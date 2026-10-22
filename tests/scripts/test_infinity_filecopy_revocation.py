@@ -37,6 +37,24 @@ class RevocationTests(unittest.TestCase):
         self.assertRaises(MOD.RevocationError, MOD.marker_name, "")
         self.assertRaises(MOD.RevocationError, MOD.marker_name, "x" * 1025)
 
+    def test_confirmed_revocation_can_precede_first_filecopy(self):
+        folder = self.root / "new-filecopy-state"
+        self.assertFalse(folder.exists())
+        MOD.ensure_state_dir(folder)
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+        MOD.ensure_state_dir(folder)
+        self.assertTrue(MOD.create_fence(folder, "preemptively-revoked"))
+        self.assertFalse(MOD.create_fence(folder, "preemptively-revoked"))
+
+    def test_revocation_refuses_writable_state_parent(self):
+        parent = self.root / "writable"
+        parent.mkdir(mode=0o777)
+        parent.chmod(0o777)
+        with self.assertRaises(MOD.RevocationError):
+            MOD.ensure_state_dir(parent / "jobs")
+        self.assertFalse((parent / "jobs").exists())
+
     def test_marker_is_durable_idempotent_and_private(self):
         self.assertTrue(MOD.create_fence(self.root, "operator"))
         self.assertFalse(MOD.create_fence(self.root, "operator"))
