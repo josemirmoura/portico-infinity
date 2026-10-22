@@ -124,6 +124,67 @@ func TestWorkerDurableProgressAndNoSecondDispatch(t *testing.T) {
     if !bytes.Equal(original, copied) { t.Fatal("copied binary differs") }
 }
 
+func TestOperatorFenceIsScopedAndPreventsWorkerStart(t *testing.T) {
+    dir, host, src, dst, id := fixture(t)
+    original := bytes.Repeat([]byte("model-block"), 400000)
+    if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), original, 0600); err != nil {
+        t.Fatal(err)
+    }
+    manifest := Manifest{JobID:id, Subject:"oauth-user-a", Source:src, Destination:dst, MaxBytes:1<<30}
+    prepare(t,dir,manifest)
+    marker, err := SubjectRevocationMarker("oauth-user-a")
+    if err != nil { t.Fatal(err) }
+    if err := os.WriteFile(filepath.Join(dir,marker), []byte("revoked\n"),0600); err != nil { t.Fatal(err) }
+    revoked, err := IsSubjectRevoked(dir,"oauth-user-a")
+    if err != nil || !revoked { t.Fatal("operator fence not detected",err) }
+    unaffected, err := IsSubjectRevoked(dir,"oauth-user-b")
+    if err != nil || unaffected { t.Fatal("unrelated subject unexpectedly revoked",err) }
+    if _,err := Run(context.Background(),dir,host,id); !errors.Is(err,context.Canceled) {
+        t.Fatalf("revoked principal was allowed to run: %v",err)
+    }
+    if p:=readProgress(t,dir,id);p.Phase!="cancelled" { t.Fatalf("phase=%q",p.Phase) }
+    if _,err := os.Stat(filepath.Join(host,strings.TrimPrefix(dst,"/"))); !errors.Is(err,os.ErrNotExist) {
+        t.Fatal("revoked principal published a file")
+    }
+}
+
+func TestRevocationFenceRejectsUnsafeSymlink(t *testing.T) {
+    dir,_,_,_,_ := fixture(t)
+    marker,err:=SubjectRevocationMarker("user")
+    if err != nil { t.Fatal(err) }
+    if err:=os.Symlink(filepath.Join(dir,"outside"), filepath.Join(dir,marker));err != nil { t.Fatal(err) }
+    if _,err:=IsSubjectRevoked(dir,"user");err == nil { t.Fatal("symlink marker was trusted") }
+}
+
+func TestMidStreamRevocationFailsBeforeFilePublication(t *testing.T) {
+    dir,host,src,dst,id:=fixture(t)
+    source:=bytes.Repeat([]byte("model-block"), 800000)
+    if err:=os.WriteFile(filepath.Join(host,strings.TrimPrefix(src,"/")),source,0600);err != nil { t.Fatal(err) }
+    prepare(t,dir,Manifest{JobID:id,Subject:"revoked-midstream",Source:src,Destination:dst,MaxBytes:1<<30})
+    marker,err:=SubjectRevocationMarker("revoked-midstream")
+    if err != nil { t.Fatal(err) }
+    checks:=0
+    check:=func(d,s string)(bool,error) {
+        checks++
+        if checks==3 {
+            if err:=os.WriteFile(filepath.Join(d,marker),[]byte("revoked\n"),0600);err != nil {
+                return false,err
+            }
+        }
+        return IsSubjectRevoked(d,s)
+    }
+    if _,err:=runWithRevocationCheck(context.Background(),dir,host,id,check);!errors.Is(err,context.Canceled) {
+        t.Fatalf("mid-stream revoked worker did not cancel: %v",err)
+    }
+    if checks<3 { t.Fatalf("stream checked revocation only %d times",checks) }
+    if p:=readProgress(t,dir,id);p.Phase!="cancelled" {
+        t.Fatalf("worker reported %s, expected cancelled",p.Phase)
+    }
+    if _,err:=os.Stat(filepath.Join(host,strings.TrimPrefix(dst,"/")));!errors.Is(err,os.ErrNotExist) {
+        t.Fatal("revoked long copy published destination")
+    }
+}
+
 func TestWorkerCancelledWithoutPublishing(t *testing.T) {
     dir, host, src, dst, id := fixture(t)
     if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), bytes.Repeat([]byte("x"), 4<<20), 0600); err != nil {
