@@ -1,6 +1,6 @@
 # Pórtico Infinity | Ciclo de vida do runtime (pré-v1.0)
 
-**Estado:** implementação candidata. Exige CI e E2E Docker descartável aprovados no SHA; não foi executada no SRV-IA nem autoriza release.
+**Estado atualizado em 22/10/2026:** implementação de desativação e remoção **restrita ao runtime** aprovada em CI e Docker real descartável (PR #27, merge `c3a8a154fc3d9a1c4b1d20c2d78869471906ff9b`, 20/20 checks; [workflow](https://github.com/josemirmoura/portico-infinity/actions/runs/39824785485)). Não executada no SRV-IA; não constitui desinstalação completa, revogação OAuth nem autorização de release.
 
 O utilitário `scripts/infinity-lifecycle.py` é independente do `scripts/remove.sh` herdado do Community. Opera exclusivamente na instância **`portico-infinity`**, com diretório de controle **`/srv/portico-infinity`**. Requer console/root do proprietário fora do MCP e conferência das etiquetas Docker de contêineres, redes e volumes **antes de qualquer alteração**. Serviços desconhecidos, projeto estrangeiro, rede compartilhada e workers de cópia ativa causam bloqueio.
 
@@ -34,7 +34,7 @@ sudo python3 scripts/infinity-lifecycle.py --uninstall-runtime --confirm UNINSTA
 
 ## Gates que permanecem
 
-1. CI e E2E da rotina de desativação/removal runtime no SHA exato, com reteste após correções.
+1. **PASS (runtime-only):** CI e Docker E2E descartável da PR #27 no SHA exato. Revalidar apenas se a implementação ou ambiente correspondente mudar.
 2. Desinstalação **completa** segura e recuperação pós-falha: inventário + backups + destruição verificada de recursos exclusivamente Infinity, preservando os dados do teto; rotas/identidade externas sob autoridade do operador.
 3. E2E global OAuth/revogação, worker multigigabyte/recovery, reboot, isolamento e critérios do `EXECUTION_PLAN.md`.
 4. Teste pessoal do proprietário e **GO/NO-GO expresso** antes de qualquer publicação v1.0.
