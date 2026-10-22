@@ -221,8 +221,7 @@ jobs:
             ./tests/integration/infinity-filecopy-recovery-probe
           "$RUNNER_TEMP/filecopy-recovery-probe" -phase start
 
-          JOB_ID="$(sudo -u portico-infinity-exec cat \
-            "/opt/infinity-e2e-$INFINITY_RUN_ID/real-filecopy-recovery-job.id")"
+          JOB_ID="$(cat "$RUNNER_TEMP/real-filecopy-recovery-job.id")"
           [[ "$JOB_ID" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]
           UNIT="$JOB_ID.service"
           sudo systemctl kill --kill-whom=main --signal=STOP "$UNIT"
@@ -296,8 +295,8 @@ jobs:
           set +e
           # Unfreeze only the synthetic unit owned by this disposable run.
           if [[ "${INFINITY_RUN_ID:-}" =~ ^[0-9]{1,24}$ ]] &&
-             [ -f "/opt/infinity-e2e-${INFINITY_RUN_ID}/real-filecopy-recovery-job.id" ]; then
-            RECOVERY_JOB="$(sudo cat "/opt/infinity-e2e-${INFINITY_RUN_ID}/real-filecopy-recovery-job.id")"
+             [ -f "$RUNNER_TEMP/real-filecopy-recovery-job.id" ]; then
+            RECOVERY_JOB="$(cat "$RUNNER_TEMP/real-filecopy-recovery-job.id")"
             if [[ "$RECOVERY_JOB" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]; then
               sudo systemctl kill --kill-whom=main --signal=CONT "$RECOVERY_JOB.service" || true
               sudo systemctl stop "$RECOVERY_JOB.service" || true
