@@ -64,6 +64,42 @@ func TestWorkerValidatesScopesAndManifest(t *testing.T) {
     if _, err := readPinnedManifest(dir, id); err == nil { t.Fatal("world-readable manifest accepted") }
 }
 
+func TestWorkerSelectedRootAndIsolation(t *testing.T) {
+    _, host, _, _, id := fixture(t)
+    scope := "/mnt"
+    source := "/mnt/models/origin.gguf"
+    destination := "/mnt/models/replica.gguf"
+    valid := Manifest{JobID:id, Subject:"operator", ScopeRoot:scope,
+        Source:source, Destination:destination, MaxBytes:1 << 30}
+    if err := valid.Validate(id); err != nil { t.Fatalf("valid alternative scope rejected: %v", err) }
+    for _, invalid := range []Manifest{
+        {JobID:id, Subject:"operator", ScopeRoot:"/srv", Source:"/srv/file", Destination:"/srv/other", MaxBytes:1 << 30},
+        {JobID:id, Subject:"operator", ScopeRoot:"/etc", Source:"/etc/file", Destination:"/etc/other", MaxBytes:1 << 30},
+        {JobID:id, Subject:"operator", ScopeRoot:"/", Source:"/mnt/file", Destination:"/mnt/other", MaxBytes:1 << 30},
+        {JobID:id, Subject:"operator", ScopeRoot:"/mnt/../opt", Source:source, Destination:destination, MaxBytes:1 << 30},
+        {JobID:id, Subject:"operator", ScopeRoot:scope, Source:"/opt/models/origin.gguf", Destination:destination, MaxBytes:1 << 30},
+        {JobID:id, Subject:"operator", ScopeRoot:scope, Source:source, Destination:"/mnt/models/.env", MaxBytes:1 << 30},
+    } {
+        if err := invalid.Validate(id); err == nil { t.Fatalf("unsafe root or path accepted: %+v", invalid) }
+    }
+
+    if err := os.MkdirAll(filepath.Join(host, "mnt", "models"), 0700); err != nil { t.Fatal(err) }
+    original := bytes.Repeat([]byte("alternate-operator-ceiling"), 10000)
+    if err := os.WriteFile(filepath.Join(host, "mnt", "models", "origin.gguf"), original, 0600); err != nil {
+        t.Fatal(err)
+    }
+    dir := filepath.Join(t.TempDir(), "state")
+    if err := os.Mkdir(dir, 0700); err != nil { t.Fatal(err) }
+    prepare(t, dir, valid)
+    sum := sha256.Sum256(original)
+    expected := hex.EncodeToString(sum[:])
+    sha, err := Run(context.Background(), dir, host, id)
+    if err != nil { t.Fatal(err) }
+    if sha != expected { t.Fatal("alternate root copy hash mismatch") }
+    data, err := os.ReadFile(filepath.Join(host, "mnt", "models", "replica.gguf"))
+    if err != nil || !bytes.Equal(original, data) { t.Fatal("alternate root copy bytes differ", err) }
+}
+
 func TestWorkerDurableProgressAndNoSecondDispatch(t *testing.T) {
     dir, host, src, dst, id := fixture(t)
     original := bytes.Repeat([]byte("synthetic-model-block"), 130000)
