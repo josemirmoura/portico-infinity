@@ -124,7 +124,7 @@ expected_job="$(python3 - "$SUBJECT" "$GITHUB_RUN_ID" <<'PY'
 import hashlib,sys
 subject,run=sys.argv[1:]
 op="oauth-filecopy-inflight-"+run
-print("vps-agent-filecopy-"+hashlib.sha256((subject+"\\x00"+op).encode()).hexdigest()[:32])
+print("vps-agent-filecopy-"+hashlib.sha256((subject+"\x00"+op).encode()).hexdigest()[:32])
 PY
 )"
 [[ "$expected_job" =~ ^vps-agent-filecopy-[0-9a-f]{32}$ ]]
