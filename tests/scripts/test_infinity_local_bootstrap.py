@@ -17,7 +17,7 @@ COPY = (
     ".env.example", "compose.yaml", "VERSION",
     "scripts/install.sh", "scripts/install-infinity.sh", "scripts/init.sh",
     "scripts/authority-summary.py",
-    "scripts/configure-infinity-opt.py", "scripts/delegate-root.py",
+    "scripts/configure-infinity-opt.py", "scripts/infinity-scope.py", "scripts/delegate-root.py",
     "scripts/lib/product.sh", "scripts/lib/i18n.py",
     "config/policy.example.yaml",
 )
@@ -107,6 +107,34 @@ class InfinityLocalBootstrapTest(unittest.TestCase):
         self.assertNotIn("up -d --build", commands)
         self.assertNotIn("FAKE VERIFY OK", result.stdout)
 
+    def test_valid_alternative_mnt_root_is_consistent(self):
+        if not Path("/mnt").is_dir():
+            self.skipTest("runner does not provide /mnt")
+        result = self.run_script(
+            "--scope", "/mnt", "--local-only", "--run-as", "infinity-test",
+            "--yes", "--ack-infinity-opt",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("INFINITY SCOPE OK: /mnt", result.stdout)
+        env = (self.root / ".env").read_text()
+        self.assertIn("VPS_AGENT_SCOPE_ROOT=/mnt", env)
+        policy = (self.root / "config" / "policy.yaml").read_text()
+        self.assertIn("    - /mnt", policy)
+        self.assertNotIn("    - /opt", policy)
+        self.assertNotIn("up -d --build", self.docker_log.read_text())
+
+    def test_reject_dangerous_scope_without_side_effects(self):
+        for scope in ("/", "/etc", "/srv", "/tmp", "/mnt/../etc", "/opt/", "relative"):
+            with self.subTest(scope=scope):
+                result = self.run_script(
+                    "--scope", scope, "--local-only", "--run-as", "infinity-test",
+                    "--yes", "--ack-infinity-opt",
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((self.root / ".env").exists())
+                self.assertFalse((self.root / "config" / "policy.yaml").exists())
+                self.assertFalse(self.docker_log.exists())
+
     def test_missing_approval_does_not_create_state_or_call_docker(self):
         result = self.run_script(
             "--local-only", "--run-as", "infinity-test", "--yes"
@@ -118,7 +146,7 @@ class InfinityLocalBootstrapTest(unittest.TestCase):
         self.assertFalse(self.docker_log.exists())
 
     def test_rejects_profile_and_scope_override(self):
-        for illegal in ("--profile", "--scope", "--ack-whole-host", "--create-scope"):
+        for illegal in ("--profile", "--ack-whole-host", "--create-scope"):
             with self.subTest(illegal=illegal):
                 result = self.run_script(illegal, "--yes", "--ack-infinity-opt")
                 self.assertNotEqual(result.returncode, 0)
