@@ -9,6 +9,7 @@ import (
     "errors"
     "os"
     "path/filepath"
+    "strings"
     "testing"
 )
 
@@ -66,7 +67,7 @@ func TestWorkerValidatesScopesAndManifest(t *testing.T) {
 func TestWorkerDurableProgressAndNoSecondDispatch(t *testing.T) {
     dir, host, src, dst, id := fixture(t)
     original := bytes.Repeat([]byte("synthetic-model-block"), 130000)
-    if err := os.WriteFile(filepath.Join(host, src), original, 0600); err != nil { t.Fatal(err) }
+    if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), original, 0600); err != nil { t.Fatal(err) }
     dig := sha256.Sum256(original)
     want := hex.EncodeToString(dig[:])
     prepare(t, dir, Manifest{JobID: id, Subject: "oauth-subject", Source: src, Destination: dst,
@@ -82,14 +83,14 @@ func TestWorkerDurableProgressAndNoSecondDispatch(t *testing.T) {
     if _, err := Run(context.Background(), dir, host, id); err == nil {
         t.Fatal("completed job was dispatched twice")
     }
-    copied, err := os.ReadFile(filepath.Join(host, dst))
+    copied, err := os.ReadFile(filepath.Join(host, strings.TrimPrefix(dst, "/")))
     if err != nil { t.Fatal(err) }
     if !bytes.Equal(original, copied) { t.Fatal("copied binary differs") }
 }
 
 func TestWorkerCancelledWithoutPublishing(t *testing.T) {
     dir, host, src, dst, id := fixture(t)
-    if err := os.WriteFile(filepath.Join(host, src), bytes.Repeat([]byte("x"), 4<<20), 0600); err != nil {
+    if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), bytes.Repeat([]byte("x"), 4<<20), 0600); err != nil {
         t.Fatal(err)
     }
     prepare(t, dir, Manifest{JobID: id, Subject: "user", Source: src, Destination: dst, MaxBytes: 1<<30})
@@ -100,7 +101,7 @@ func TestWorkerCancelledWithoutPublishing(t *testing.T) {
     }
     progress := readProgress(t, dir, id)
     if progress.Phase != "cancelled" { t.Fatalf("cancelled job phase: %s", progress.Phase) }
-    if _, err := os.Stat(filepath.Join(host, dst)); !errors.Is(err, os.ErrNotExist) {
+    if _, err := os.Stat(filepath.Join(host, strings.TrimPrefix(dst, "/"))); !errors.Is(err, os.ErrNotExist) {
         t.Fatal("cancelled job published destination")
     }
     if _, err := Run(context.Background(), dir, host, id); err == nil {
