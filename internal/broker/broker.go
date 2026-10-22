@@ -386,6 +386,8 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 			sum, err := fs.Patch(req.Resource, in.OldText, in.NewText, in.ExpectedSHA256)
 			return map[string]any{"path": req.Resource, "sha256": sum, "patched": err == nil}, err
 		})
+	case "file.copy.start":
+        return b.startFilecopy(ctx, req)
 	case "file.copy":
 		fs, fsErr := b.effectiveFS(ctx, req.Subject)
 		if fsErr != nil {
@@ -681,6 +683,12 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 		}
 		if b.State != nil {
 			stored, getErr := b.State.GetJob(ctx, req.Resource)
+            if getErr == nil && stored.Tool == "file.copy.start" {
+                if stored.Subject != req.Subject { return deny(req.ID, "job_error", "job belongs to another subject") }
+                result, statusErr := b.filecopyStatus(ctx, stored)
+                if statusErr != nil { return deny(req.ID, "reconcile_required", statusErr.Error()) }
+                return ok(req.ID, result)
+            }
 			if getErr == nil && strings.HasPrefix(stored.Tool, "compose.") {
 				if stored.Subject != req.Subject {
 					return deny(req.ID, "job_error", "job belongs to another subject")
@@ -729,6 +737,9 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 		}
 		if b.State != nil {
 			stored, lookupErr := b.State.GetJob(ctx, req.Resource)
+            if lookupErr == nil && stored.Tool == "file.copy.start" {
+                return b.cancelFilecopy(ctx, req, stored)
+            }
 			if lookupErr == nil && strings.HasPrefix(stored.Tool, "compose.") {
 				if stored.Subject != req.Subject {
 					return deny(req.ID, "job_error", "job belongs to another subject")
