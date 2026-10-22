@@ -5,6 +5,7 @@ on:
     paths:
       - 'internal/broker/**'
       - 'tests/integration/infinity-docker-probe/**'
+      - 'tests/integration/infinity-filecopy-mcp-probe/**'
       - '.github/workflows/infinity-disposable-e2e.yml'
   push:
     branches: [main]
@@ -76,6 +77,21 @@ jobs:
             exit 1
           fi
 
+      - name: Stage independent host worker only in disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /usr/local/libexec/portico-infinity/portico-filecopy-worker
+          test ! -L /usr/local/libexec/portico-infinity
+          CGO_ENABLED=0 go build -trimpath \
+            -o "$RUNNER_TEMP/portico-filecopy-worker-ci" ./cmd/portico-filecopy-worker
+          sudo install -d -o root -g root -m 0755 /usr/local/libexec/portico-infinity
+          sudo install -o root -g root -m 0755 \
+            "$RUNNER_TEMP/portico-filecopy-worker-ci" \
+            /usr/local/libexec/portico-infinity/portico-filecopy-worker
+
       - name: Initialize actual scoped policy and isolated Compose instance
         shell: bash
         run: |
@@ -90,6 +106,8 @@ jobs:
             "COMPOSE_PROJECT_NAME":"portico-infinity",
             "VPS_AGENT_INSTANCE_NAME":"portico-infinity",
             "VPS_AGENT_INFINITY_PROTECTED_ROOT":"/srv/portico-infinity",
+            "VPS_AGENT_INFINITY_FILECOPY_JOBS":"1",
+            "VPS_AGENT_INFINITY_FILECOPY_MAX_BYTES":"536870912",
             "VPS_AGENT_PORT":"18081",
             "VPS_AGENT_AUTH_MODE":"static",
             "VPS_AGENT_GATEWAY_IMAGE":"portico-infinity-gateway:e2e",
@@ -154,6 +172,32 @@ jobs:
           cd /srv/portico-infinity
           sudo docker compose -p portico-infinity exec -T broker             /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
 
+      - name: Real authenticated MCP to Broker to host systemd binary worker
+        shell: bash
+        env:
+          INFINITY_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          LAB="/opt/infinity-e2e-${INFINITY_RUN_ID}"
+          sudo -u portico-infinity-exec python3 - "$LAB" <<'PY'
+          import os,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          path=root/"real-filecopy-source.gguf"
+          with path.open('xb') as handle:
+              handle.truncate(128 << 20)
+              handle.flush()
+              os.fsync(handle.fileno())
+          PY
+          TOKEN="$(sudo sed -n 's/^VPS_AGENT_STATIC_TOKEN=//p' /srv/portico-infinity/.env)"
+          test "${#TOKEN}" -ge 40
+          echo "::add-mask::$TOKEN"
+          export INFINITY_E2E_BEARER_TOKEN="$TOKEN"
+          go run ./tests/integration/infinity-filecopy-mcp-probe
+          cd /srv/portico-infinity
+          sudo docker compose -p portico-infinity exec -T broker \
+            /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
+
       - name: Real emergency stop, verification and restart
         shell: bash
         run: |
@@ -197,6 +241,11 @@ jobs:
           if [ -d /srv/portico-infinity ]; then
             cd /srv/portico-infinity
             sudo docker compose -p portico-infinity down --remove-orphans
+          fi
+          # The isolated runner alone staged this host binary.
+          if [ -f /usr/local/libexec/portico-infinity/portico-filecopy-worker ]; then
+            sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
+            sudo rmdir /usr/local/libexec/portico-infinity 2>/dev/null || true
           fi
           if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
             sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}" 2>/dev/null || true
