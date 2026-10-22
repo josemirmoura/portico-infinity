@@ -153,18 +153,21 @@ func privateAtomicJSON(dir, name string, value any) error {
     if err != nil { return err }
     var nonce [8]byte
     if _, err := rand.Read(nonce[:]); err != nil { return err }
-    temp := filepath.Join(dir, "."+name+".tmp-"+hex.EncodeToString(nonce[:]))
-    f, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+    root, err := os.OpenRoot(dir)
+    if err != nil { return err }
+    defer root.Close()
+    temp := "."+name+".tmp-"+hex.EncodeToString(nonce[:])
+    f, err := root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
     if err != nil { return err }
     published := false
     defer func() {
         _ = f.Close()
-        if !published { _ = os.Remove(temp) }
+        if !published { _ = root.Remove(temp) }
     }()
     if _, err := f.Write(raw); err != nil { return err }
     if err := f.Sync(); err != nil { return err }
     if err := f.Close(); err != nil { return err }
-    if err := os.Rename(temp, filepath.Join(dir, name)); err != nil { return err }
+    if err := root.Rename(temp, name); err != nil { return err }
     published = true
     dirfd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
     if err != nil { return err }
@@ -197,18 +200,32 @@ func Run(ctx context.Context, dir, hostRoot, id string) (string, error) {
 
     // A completed/cancelled or previously uncertain task is NEVER retried
     // simply because the systemd unit was restarted.
-    existing := filepath.Join(dir, id+".progress.json")
-    if data, err := os.ReadFile(existing); err == nil {
+    progressRoot, err := os.OpenRoot(dir)
+    if err != nil { return "", err }
+    existing, openErr := progressRoot.Open(id+".progress.json")
+    if openErr == nil {
+        data, readErr := io.ReadAll(io.LimitReader(existing, MaxManifestBytes+1))
+        closeErr := existing.Close()
+        if readErr != nil { _ = progressRoot.Close(); return "", readErr }
+        if closeErr != nil { _ = progressRoot.Close(); return "", closeErr }
+        if len(data) > MaxManifestBytes {
+            _ = progressRoot.Close()
+            return "", errors.New("filecopy progress too large: operator reconciliation required")
+        }
         var previous Progress
         if json.Unmarshal(data, &previous) != nil || previous.JobID != id {
+            _ = progressRoot.Close()
             return "", errors.New("filecopy progress is corrupt: operator reconciliation required")
         }
         if previous.Phase != "queued" {
+            _ = progressRoot.Close()
             return "", errors.New("filecopy already dispatched: no automatic retry")
         }
-    } else if !errors.Is(err, os.ErrNotExist) {
-        return "", err
+    } else if !errors.Is(openErr, os.ErrNotExist) {
+        _ = progressRoot.Close()
+        return "", openErr
     }
+    if err := progressRoot.Close(); err != nil { return "", err }
     if err := status(dir, id, "running", 0, 0, ""); err != nil { return "", err }
     fs, err := securefs.NewWithHostRoot([]string{"/opt"}, []string{"/opt"}, securefs.DefaultMaxBytes, hostRoot)
     if err != nil { return "", err }
