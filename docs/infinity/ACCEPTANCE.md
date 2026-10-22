@@ -1,6 +1,6 @@
 # Gates de aceite: Pórtico Infinity
 
-## Atualização verificável em 22/10/2026 (pós-PR #31)
+## Atualização verificável em 22/10/2026 (pós-PR #36)
 
 A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivamente em runners descartáveis do GitHub; não autorizam atualização do SRV-IA nem publicação.
 
@@ -11,6 +11,10 @@ A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivament
 | Revogação externa da identidade | [PR #29](https://github.com/josemirmoura/portico-infinity/pull/29), [ZITADEL real](https://github.com/josemirmoura/portico-infinity/actions/runs/39828400590) | 16/16 checks; token ativo antes e inativo após desativação administrativa de conta de serviço sintética |
 | Worker executado via systemd | [PR #30](https://github.com/josemirmoura/portico-infinity/pull/30), [CI](https://github.com/josemirmoura/portico-infinity/actions/runs/39835994798) | 20/20 checks; cópia, hash, manifesto inseguro negado, cancelamento SIGTERM sem publicação |
 | MCP até worker real | [PR #31](https://github.com/josemirmoura/portico-infinity/pull/31), [Docker E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39837703649) | 17/17 checks; token estático de laboratório, Gateway → Broker → systemd → cópia de 128 MiB, auditoria e negações |
+| Cancelamento pelo MCP em job ativo | [PR #33](https://github.com/josemirmoura/portico-infinity/pull/33) | Ensaio sintético: job.cancel de cópia longa e ausência de publicação parcial; limitado a token de laboratório |
+| Reconciliação após restart do Broker | [PR #34](https://github.com/josemirmoura/portico-infinity/pull/34), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39847946672) | 17/17 checks; job systemd preservado, reconexão e cancelamento MCP após restart do contêiner; **não prova reboot do host** |
+| Desativação com worker ativo | [PR #35](https://github.com/josemirmoura/portico-infinity/pull/35), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39850331376) | 20/20 checks; bloqueia desativação e remoção quando worker real está `activating`, sem afetar projetos externos |
+| Desativação com worker falhado | [PR #36](https://github.com/josemirmoura/portico-infinity/pull/36), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39862020998) | 8/8 workflows no head `8ea9e1cf`; falha de worker `systemd` detectada e bloqueada até reconciliação externa |
 
 **Bloqueadores reais da v1.0:**
 
