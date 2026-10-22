@@ -78,6 +78,13 @@ func main() {
     root,err:=os.OpenRoot(rootPath)
     if err!=nil {panic(err)}
     defer root.Close()
+    // The synthetic /opt workspace is owned by a non-root executor. The
+    // trusted CI caller persists its job marker only in its own runner temp.
+    temp:=os.Getenv("RUNNER_TEMP")
+    require(filepath.IsAbs(temp)&&temp!="/"&&filepath.Clean(temp)==temp,"unsafe runner temp")
+    records,err:=os.OpenRoot(temp)
+    if err!=nil{panic(err)}
+    defer records.Close()
     in,err:=root.Stat(sourceLeaf)
     require(err==nil&&in.Mode().IsRegular()&&in.Size()==8<<30,
         "missing synthetic 8 GiB source")
@@ -123,7 +130,7 @@ func main() {
             time.Sleep(70*time.Millisecond)
         }
         require(observed,"no running worker with >=64MiB checkpoint")
-        f,err:=root.OpenFile(recordLeaf,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+        f,err:=records.OpenFile(recordLeaf,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
         if err!=nil{panic(err)}
         _,writeErr:=f.WriteString(id+"\n")
         syncErr:=f.Sync()
@@ -134,7 +141,7 @@ func main() {
         fmt.Println("BROKER_RESTART_LIVE_COPY_CHECKPOINT: PASS")
         return
     }
-    id:=readID(root)
+    id:=readID(records)
     current,err:=call("job.status",map[string]any{"job_id":id})
     if err!=nil{panic(err)}
     if *phase=="check" {
