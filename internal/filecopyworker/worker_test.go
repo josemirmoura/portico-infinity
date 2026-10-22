@@ -185,6 +185,29 @@ func TestMidStreamRevocationFailsBeforeFilePublication(t *testing.T) {
     }
 }
 
+func TestUnreadableRevocationFenceIsNotReportedAsCancellation(t *testing.T) {
+    dir,host,src,dst,id:=fixture(t)
+    source:=bytes.Repeat([]byte("model-block"), 800000)
+    if err:=os.WriteFile(filepath.Join(host,strings.TrimPrefix(src,"/")),source,0600);err != nil {t.Fatal(err)}
+    prepare(t,dir,Manifest{JobID:id,Subject:"blocked-io",Source:src,Destination:dst,MaxBytes:1<<30})
+    probes:=0
+    probe:=func(d,s string)(bool,error) {
+        probes++
+        if probes==3 {return false,errors.New("revocation state unavailable")}
+        return IsSubjectRevoked(d,s)
+    }
+    if _,err:=runWithRevocationCheck(context.Background(),dir,host,id,probe);err == nil {
+        t.Fatal("unavailable revocation fence unexpectedly allowed copy")
+    }
+    if probes<3 {t.Fatal("revocation probe was not exercised midstream")}
+    if p:=readProgress(t,dir,id);p.Phase!="reconcile_required" {
+        t.Fatalf("expected fail-closed reconciliation, got %s",p.Phase)
+    }
+    if _,err:=os.Stat(filepath.Join(host,strings.TrimPrefix(dst,"/")));!errors.Is(err,os.ErrNotExist) {
+        t.Fatal("copy was published after revocation probe failure")
+    }
+}
+
 func TestWorkerCancelledWithoutPublishing(t *testing.T) {
     dir, host, src, dst, id := fixture(t)
     if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), bytes.Repeat([]byte("x"), 4<<20), 0600); err != nil {
