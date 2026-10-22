@@ -8,7 +8,13 @@ Para instalações novas com escopo privilegiado alternativo, o Broker obtém o 
 
 Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/var` e `/root`), `.env*` e caminhos de origem/destino fora do teto são recusados. O valor do root jamais é fornecido como argumento MCP. O executável instalado no host continua sob decisão independente do operador, **desabilitado até habilitação explícita** e aceite operacional.
 
-**Escopo desta implementação:** validação e testes sintéticos do motor; ainda faltam E2E multigigabyte, reinício/retomada, revogação real e teste humano. `ReadWritePaths` e raiz lógica precisam ser revistos em CI antes de habilitar feature para usuários.
+**Evidências em 22/10/2026:** o motor foi provado com fonte esparsa de 2.147.487.744 bytes, SHA-256, cancelamento e replay negado em runner descartável (PR #28, 21/21 checks); o worker foi executado por systemd real com confinamento, SHA, manifesto malicioso recusado e SIGTERM com checkpoint `cancelled` (PR #30, 20/20 checks). As PRs #28/#30 não comprovam sozinhas o percurso MCP, o reboot, a retomada em offset nem a ativação em produção. A feature permanece opt-in e **OFF no SRV-IA**.
+
+## Evidência rastreável de laboratório
+
+- [PR #28](https://github.com/josemirmoura/portico-infinity/pull/28), [E2E de arquivo >2 GiB](https://github.com/josemirmoura/portico-infinity/actions/runs/39825831727), merge `5c4da681903512cd747d9ba328da14ae0def0bfe`: SHA em origem/destino, bytes/progresso, cancelamento após 128 MiB, replay negado.
+- [PR #30](https://github.com/josemirmoura/portico-infinity/pull/30), [E2E systemd real](https://github.com/josemirmoura/portico-infinity/actions/runs/39835994798), merge `07e401d8092782d917f055fea150c1a011e763f4`: cópia de 128 MiB através de unidade systemd, rejeição de `.env`, cancelamento de uma fonte esparsa de 8 GiB e bloqueio de reexecução.
+- **Limite das provas acima:** cada ensaio usa dados sintéticos e host descartável. O fluxo de cliente MCP autenticado até o binário systemd é um gate separado, e o UAT do proprietário é obrigatório.
 
 ## Domínios de confiança
 
@@ -43,4 +49,4 @@ A transferência interrompida não possui retomada em offset comprovada: estados
 
 ## Aceite mínimo futuro
 
-Uma rodada curta em runner descartável com arquivo esparso acima de 512 MiB: cópia com hash correto, status/progresso, cancelamento sem publicação, parada/retorno do Broker e reconciliação de estado incerto. Sem copiar modelos reais da Nara, sem leitura MCP de bytes binários e sem modificar Community. Ativar no SRV-IA somente após o operador verificar backup e SHA do worker, como etapa independente do MCP.
+Próximo gate ainda necessário: validar o percurso inteiro MCP/OAuth → Broker → systemd em arquivo >512 MiB sob cota explícita, e a recuperação/reconciliação após interromper/reiniciar Broker/host. Os testes unitários e E2E segmentados acima devem ser reaproveitados, sem repetições indiscriminadas. Sem copiar modelos reais da Nara, sem leitura MCP de bytes binários e sem modificar Community. Ativar no SRV-IA somente após o operador verificar backup e SHA do worker, como etapa independente do MCP.
