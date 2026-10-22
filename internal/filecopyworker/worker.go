@@ -104,7 +104,7 @@ func CheckDir(dir string) error {
     info, err := os.Lstat(dir)
     if err != nil { return err }
     if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 ||
-        info.Mode().Perm()&0022 != 0 {
+        info.Mode().Perm()&0077 != 0 {
         return errors.New("unsafe filecopy state directory")
     }
     st, ok := info.Sys().(*syscall.Stat_t)
