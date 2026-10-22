@@ -20,7 +20,7 @@ rollback() {
   set +e
   echo "UPGRADE_SCALE001_FAILED_CODE=$rc"
   if (( worker_installed )); then
-    echo 'ROLLBACK: remove newly installed host worker'
+    echo 'ROLLBACK: remove only the newly installed host worker'
     if [[ -f "$worker_host" && ! -L "$worker_host" ]]; then
       rm -f -- "$worker_host"
     fi
@@ -88,85 +88,12 @@ git merge-base --is-ancestor "$TARGET" origin/main
 git diff --quiet "$OLD" "$TARGET" -- internal/state/
 
 # The initial rollout must never enable an untested privileged worker.
-if grep -Eq '^VPS_AGENT_INFINITY_FILECOPY_JOBS=1[[:space:]]*
-mkdir -p "$BACKUP_BASE"
-test ! -L "$BACKUP_BASE"
-chmod 700 "$BACKUP_BASE"
-backup="$BACKUP_BASE/scale001-$(date -u +%Y%m%dT%H%M%SZ)-b6102806bfad"
-mkdir -m 700 "$backup"
-printf '%s\n' "$OLD" > "$backup/previous-sha.txt"
-for svc in zitadel-api zitadel-login zitadel-postgres; do
-  docker inspect -f '{{.Id}}' "portico-infinity-$svc-1" > "$backup/$svc.id"
-done
-
-echo "=== STOP ONLY GATEWAY/BROKER AND ARCHIVE CONSISTENT RUNTIME ==="
-maintenance_started=1
-"${COMPOSE[@]}" stop gateway
-check_jobs
-"${COMPOSE[@]}" stop broker
-tar -C "$BASE" -czf "$backup/runtime.tar.gz" \
-  .env config state compose.yaml compose.infinity-auth.remote.yaml
-tar -tzf "$backup/runtime.tar.gz" >/dev/null
-(cd "$backup" && sha256sum runtime.tar.gz > runtime.sha256 && sha256sum -c --status runtime.sha256)
-echo "BACKUP_VERIFIED=$backup"
-
-echo "=== DEPLOY APPROVED SCALE001 SHA, FILECOPY WORKER OFF ==="
-git switch --detach "$TARGET"
-test "$(git rev-parse HEAD)" = "$TARGET"
-python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
-"${COMPOSE[@]}" config --quiet
-"${COMPOSE[@]}" up -d --build --no-deps --force-recreate broker gateway
-
-for i in $(seq 1 50); do
-  if [[ $(docker inspect -f '{{.State.Health.Status}}' portico-infinity-broker-1 2>/dev/null || :) = healthy &&
-        $(docker inspect -f '{{.State.Health.Status}}' portico-infinity-gateway-1 2>/dev/null || :) = healthy ]]; then
-    break
-  fi
-  sleep 2
-done
-for svc in broker gateway zitadel-api zitadel-login zitadel-postgres; do
-  test "$(docker inspect -f '{{.State.Health.Status}}' "portico-infinity-$svc-1")" = healthy
-done
-for svc in zitadel-api zitadel-login zitadel-postgres; do
-  test "$(docker inspect -f '{{.Id}}' "portico-infinity-$svc-1")" = "$(cat "$backup/$svc.id")"
-done
-docker exec portico-infinity-broker-1 \
-  /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
-
-echo "=== STAGE ROOT-OWNED HOST WORKER; KEEP MCP FEATURE DISABLED ==="
-# The operator exclusively controls /usr/local/libexec and /srv, not the MCP.
-# Never overwrite an existing executable, and keep the feature flag OFF.
-docker cp portico-infinity-broker-1:/usr/local/bin/portico-filecopy-worker \
-  "$backup/portico-filecopy-worker.image"
-test -f "$backup/portico-filecopy-worker.image"
-sha256sum "$backup/portico-filecopy-worker.image" > "$backup/worker-image.sha256"
-install -d -o root -g root -m 0755 /usr/local/libexec/portico-infinity
-test ! -L /usr/local/libexec/portico-infinity
-test ! -e "$worker_host" && test ! -L "$worker_host"
-install -o root -g root -m 0755 "$backup/portico-filecopy-worker.image" "$worker_host"
-worker_installed=1
-test "$(stat -c '%u:%g' "$worker_host")" = '0:0'
-test "$(sha256sum "$worker_host" | cut -d' ' -f1)" = \
-     "$(sha256sum "$backup/portico-filecopy-worker.image" | cut -d' ' -f1)"
-install -d -o root -g root -m 0700 "$BASE/state/filecopy-jobs"
-test ! -L "$BASE/state/filecopy-jobs"
-test "$(stat -c '%u:%g %a' "$BASE/state/filecopy-jobs")" = '0:0 700'
-echo "WORKER_STAGED_SHA256=$(sha256sum "$worker_host" | cut -d' ' -f1)"
-echo "WORKER_FEATURE_ENABLED=NO"
-
-echo "=== ONE READ-ONLY RETENTION REPORT; NO JOB CLEANUP ==="
-python3 scripts/collect-infinity-compose-units.py --retention-days 7 --limit 25
-trap - ERR
-echo "UPGRADE_SCALE001_COMPLETED=$TARGET"
-echo "BACKUP_LOCATION=$backup"
-"${COMPOSE[@]}" ps
- .env; then
-  echo 'ABORT: privileged binary copy is already enabled; independent operator review required'
+if grep -Eq '^VPS_AGENT_INFINITY_FILECOPY_JOBS=1[[:space:]]*$' .env; then
+  echo 'ABORT: filecopy is already enabled; independent review required'
   exit 1
 fi
-worker_host=/usr/local/libexec/portico-infinity/portico-filecopy-worker
 if [[ -e "$worker_host" || -L "$worker_host" ]]; then
-  echo 'ABORT: existing host worker must be reconciled; no overwrite'
+  echo 'ABORT: pre-existing host worker requires operator reconciliation'
   exit 1
 fi
 python3 - <<'PY'
@@ -225,6 +152,30 @@ docker exec portico-infinity-broker-1 \
   /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
 
 echo "=== STAGE ROOT-OWNED HOST WORKER; KEEP MCP FEATURE DISABLED ==="
+# Verify the actual running Broker container did not enable this new feature.
+flag=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  portico-infinity-broker-1 | sed -n 's/^VPS_AGENT_INFINITY_FILECOPY_JOBS=//p')
+test "$flag" = '0'
+
+docker cp portico-infinity-broker-1:/usr/local/bin/portico-filecopy-worker \
+  "$backup/portico-filecopy-worker.image"
+test -f "$backup/portico-filecopy-worker.image"
+sha256sum "$backup/portico-filecopy-worker.image" > "$backup/worker-image.sha256"
+install -d -o root -g root -m 0755 /usr/local/libexec/portico-infinity
+test ! -L /usr/local/libexec/portico-infinity
+test ! -e "$worker_host" && test ! -L "$worker_host"
+install -o root -g root -m 0755 "$backup/portico-filecopy-worker.image" "$worker_host"
+worker_installed=1
+test "$(stat -c '%u:%g' "$worker_host")" = '0:0'
+test "$(sha256sum "$worker_host" | cut -d' ' -f1)" = \
+     "$(sha256sum "$backup/portico-filecopy-worker.image" | cut -d' ' -f1)"
+install -d -o root -g root -m 0700 "$BASE/state/filecopy-jobs"
+test ! -L "$BASE/state/filecopy-jobs"
+test "$(stat -c '%u:%g %a' "$BASE/state/filecopy-jobs")" = '0:0 700'
+echo "WORKER_STAGED_SHA256=$(sha256sum "$worker_host" | cut -d' ' -f1)"
+echo "WORKER_FEATURE_ENABLED=NO"
+
+echo "=== ONE READ-ONLY RETENTION REPORT; NO JOB CLEANUP ==="
 python3 scripts/collect-infinity-compose-units.py --retention-days 7 --limit 25
 trap - ERR
 echo "UPGRADE_SCALE001_COMPLETED=$TARGET"
