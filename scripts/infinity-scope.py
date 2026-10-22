@@ -46,10 +46,14 @@ def validate_scope(raw: str) -> str:
             raise ScopeError("scope and all ancestors must already exist") from exc
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
             raise ScopeError("scope may not traverse symlinks or non-directories")
-        if info.st_mode & 0o022:
-            raise ScopeError("scope and ancestors must not be group/other writable")
-        if index < len(parts) - 1 and info.st_uid != 0:
-            raise ScopeError("scope ancestor must be root-owned")
+        # The chosen workspace itself may be writable by its project user.
+        # It cannot be replaced by that user if every *parent* is protected.
+        # A writable ancestor, in contrast, could swap out the selected root.
+        if index < len(parts) - 1:
+            if info.st_mode & 0o022:
+                raise ScopeError("scope ancestors must not be group/other writable")
+            if info.st_uid != 0:
+                raise ScopeError("scope ancestors must be root-owned")
     return raw
 
 
