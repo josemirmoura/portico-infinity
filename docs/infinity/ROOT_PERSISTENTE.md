@@ -21,7 +21,7 @@ bash scripts/install-infinity.sh --scope /mnt --local-only \
 
 A confirmação interativa, quando presente, inclui o diretório escolhido. Uma instalação existente não pode mudar de teto reaplicando o instalador; isso requer migração controlada própria.
 
-**Limitação a resolver antes da v1.0:** o worker independente de cópia binária grande ainda confina operações a `/opt` e sua unidade systemd usa `ReadWritePaths=/opt`. Portanto, o suporte a grandes cópias no teto alternativo depende de correção e testes próprios. A ativação de cópia durável continua opt-in do operador e desabilitada por padrão. Esta seção não constitui homologação de implantação nem UAT.
+**Atualização do código (22/10/2026):** a PR #26 (merge `41970625c53eb15626a49222bd5bf746a847edea`) adaptou o manifesto do worker, a validação de origem/destino e o `ReadWritePaths` da unidade ao **teto físico selecionado pelo operador**. Há testes sintéticos de teto alternativo e isolamento. A ativação de cópia durável permanece **OFF por padrão**, e o ciclo completo MCP/systemd, recuperação após reboot e aceite em host com teto alternativo ainda exigem homologação. A implementação em código não autoriza ativação no SRV-IA nem release.
 
 ## Decisão de engenharia
 
