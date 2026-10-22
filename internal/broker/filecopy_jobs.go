@@ -302,10 +302,17 @@ func (b *Broker) filecopyStatus(ctx context.Context, record state.JobRecord) (ma
         if progressErr!=nil {
             return nil,errors.New("filecopy unit failed without durable worker progress: operator reconciliation required")
         }
-        if progress.Phase=="reconcile_required" || progress.Phase=="done" {
+        // A crashed worker can leave phase=running even AFTER the atomic
+        // destination rename. Failure is trustworthy only when the worker
+        // durably recorded its own terminal failed/cancelled phase.
+        switch progress.Phase {
+        case "failed":
+            // Keep systemd failed classification.
+        case "cancelled":
+            unitState="cancelled"
+        default:
             return nil,errors.New("filecopy publication outcome uncertain: operator reconciliation required")
         }
-        if progress.Phase=="cancelled" { unitState="cancelled" }
     }
     if unitState!=record.State && unitState!="running" {
         if err:=b.State.UpdateJobState(ctx,record.ID,unitState,detail,code);err!=nil { return nil,err }
