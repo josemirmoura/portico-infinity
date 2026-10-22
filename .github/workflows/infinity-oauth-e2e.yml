@@ -9,6 +9,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/infinity-oauth-e2e.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/infinity-oauth-e2e.yml'
   workflow_dispatch:
 
 permissions:
@@ -289,6 +292,28 @@ jobs:
           assert int(x.get('exp',0)) > int(time.time()), x
           assert x.get('iss') == 'https://mcp.example.invalid', x
           print('REAL AUDIENCE-BOUND TOKEN INTROSPECTION: PASS')
+          PY
+
+          # Verify external OAuth token revocation with the *issuing* machine
+          # client, not the resource introspector. Everything is synthetic CI.
+          # Revocation alone returns 200 even for unknown tokens: assert the
+          # formerly active token becomes inactive in fresh introspection.
+          curl_ci -X POST http://zitadel-api:8080/oauth/v2/revoke \
+            -u "$PROBE_CLIENT_ID:$PROBE_CLIENT_SECRET" \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "token=$ACCESS_TOKEN" \
+            --data-urlencode 'token_type_hint=access_token' \
+            >/tmp/probe-revoked-response.txt
+          curl_ci -X POST http://zitadel-api:8080/oauth/v2/introspect \
+            -u "$INTROSPECTION_CLIENT_ID:$INTROSPECTION_CLIENT_SECRET" \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "token=$ACCESS_TOKEN" \
+            >/tmp/probe-token-post-revocation.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('/tmp/probe-token-post-revocation.json'))
+          assert x.get('active') is False, 'formerly active token remained active after revoke'
+          print('REAL ZITADEL ACCESS TOKEN REVOCATION + INTROSPECTION: PASS')
           PY
 
           curl_ci http://zitadel-api:8080/.well-known/openid-configuration > /tmp/oidc-after.json
