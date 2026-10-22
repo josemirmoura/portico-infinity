@@ -1,0 +1,50 @@
+name: Infinity SCALE-001 operator rollout script
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/infinity-scale001-operator-upgrade.sh
+      - .github/workflows/infinity-scale001-operator-script.yml
+  pull_request:
+    paths:
+      - scripts/infinity-scale001-operator-upgrade.sh
+      - .github/workflows/infinity-scale001-operator-script.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-script-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify shell syntax WITHOUT running the operator script
+        run: |
+          bash -n scripts/infinity-scale001-operator-upgrade.sh
+      - name: Check pinned SHA and disabled-by-default rollout gates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/infinity-scale001-operator-upgrade.sh').read_text()
+          required=[
+            'TARGET=c269d980d91392c2eca9ab92ab2eaa132efc6752',
+            'OLD=b6102806bfad65e70f3f5c08bfa96281d89e2f16',
+            'git diff --quiet "$OLD" "$TARGET" -- internal/state/',
+            'BACKUP_VERIFIED=$backup',
+            '--no-deps --force-recreate broker gateway',
+            'WORKER_FEATURE_ENABLED=NO',
+            'VPS_AGENT_INFINITY_FILECOPY_JOBS=',
+            'WORKER_STAGED_SHA256=',
+          ]
+          for item in required:
+            if item not in s:
+              raise SystemExit('Missing rollout guard: '+item)
+          if s.count('UPGRADE_SCALE001_COMPLETED=')!=1:
+            raise SystemExit('unexpected duplicate rollout body')
+          if 'docker compose down' in s or 'rm -rf ' in s:
+            raise SystemExit('destructive broad action prohibited')
+          print('OPERATOR_ROLLOUT_STATIC_GATES=PASS')
+          PY
