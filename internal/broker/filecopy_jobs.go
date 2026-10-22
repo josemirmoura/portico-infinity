@@ -11,6 +11,7 @@ import (
     "os"
     "path/filepath"
     "strconv"
+    "strings"
     "syscall"
     "time"
 
@@ -282,6 +283,29 @@ func readFilecopyProgress(id string) (filecopyworker.Progress,error) {
     return progress,nil
 }
 
+// classifyFilecopyUnit reconciles systemd termination with durable worker
+// checkpoints. In particular, stopped oneshots may be inactive/success even
+// though they persisted phase=cancelled, not phase=done.
+func classifyFilecopyUnit(raw string, progress filecopyworker.Progress, progressErr error) (string,string,*int,error) {
+    if progressErr == nil && progress.Phase == "cancelled" {
+        fields:=make(map[string]string)
+        for _,line:=range strings.Split(raw,"\\n") {
+            key,value,ok:=strings.Cut(line,"=")
+            if ok { fields[strings.TrimSpace(key)]=strings.TrimSpace(value) }
+        }
+        if fields["LoadState"]!="loaded" {
+            return "","",nil,errors.New("cancelled filecopy unit missing: reconcile")
+        }
+        active,sub:=fields["ActiveState"],fields["SubState"]
+        if (active=="inactive" && sub=="dead") ||
+            (active=="failed" && sub=="failed") {
+            return "cancelled","worker persisted terminal cancellation",nil,nil
+        }
+        return "","",nil,errors.New("filecopy cancellation not yet confirmed by systemd")
+    }
+    return classifyComposeUnit(raw)
+}
+
 func (b *Broker) filecopyStatus(ctx context.Context, record state.JobRecord) (map[string]any,error) {
     if !filecopyworker.ValidID(record.ID) || record.UnitName != record.ID+".service" ||
         record.Tool != "file.copy.start" {
@@ -290,9 +314,12 @@ func (b *Broker) filecopyStatus(ctx context.Context, record state.JobRecord) (ma
     out,err:=hostexec.CommandContext(ctx,"systemctl","show",record.UnitName,
         "--no-pager","--property=LoadState,ActiveState,SubState,Result,ExecMainStatus").CombinedOutput()
     if err!=nil { return nil,fmt.Errorf("cannot verify filecopy unit: %w",err) }
-    unitState,detail,code,err:=classifyComposeUnit(string(out))
-    if err!=nil { return nil,fmt.Errorf("filecopy unit uncertain: %w",err) }
     progress,progressErr:=readFilecopyProgress(record.ID)
+    // Unlike ordinary successful oneshot jobs, a systemctl stop can report
+    // inactive/dead/Result=success even when the worker exited by cancellation.
+    // The worker's durable terminal checkpoint is authoritative for that case.
+    unitState,detail,code,err:=classifyFilecopyUnit(string(out), progress, progressErr)
+    if err!=nil { return nil,fmt.Errorf("filecopy unit uncertain: %w",err) }
     if unitState=="done" {
         if progressErr!=nil || progress.Phase!="done" || progress.SHA256=="" {
             return nil,errors.New("worker finished but verified final copy metadata is unavailable: reconcile")
