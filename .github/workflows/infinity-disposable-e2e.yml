@@ -5,6 +5,7 @@ on:
     paths:
       - 'internal/broker/**'
       - 'tests/integration/infinity-docker-probe/**'
+      - 'tests/integration/infinity-filecopy-mcp-probe/**'
       - '.github/workflows/infinity-disposable-e2e.yml'
   push:
     branches: [main]
