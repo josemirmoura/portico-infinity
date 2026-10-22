@@ -4,6 +4,10 @@
 
 O utilitário `scripts/infinity-lifecycle.py` é independente do `scripts/remove.sh` herdado do Community. Opera exclusivamente na instância **`portico-infinity`**, com diretório de controle **`/srv/portico-infinity`**. Requer console/root do proprietário fora do MCP e conferência das etiquetas Docker de contêineres, redes e volumes **antes de qualquer alteração**. Serviços desconhecidos, projeto estrangeiro, rede compartilhada e workers de cópia ativa causam bloqueio.
 
+## Proteção de workers em estado incerto
+
+Antes da primeira mutação Docker, a rotina exige ausência de unidades de cópia tipadas em execução **e** no estado `failed` (prefixos `vps-agent-filecopy-*` e `portico-filecopy-*`). Uma unidade `failed` pode representar resultado durável incompleto: o operador deve verificar o job, integridade e auditoria e limpar a unidade explicitamente fora do MCP. Unidades `inactive` não bloqueiam a operação. Essa proteção não substitui reconciliação de jobs após reboot, revogação externa ou desinstalação integral.
+
 ## Procedimento seguro
 
 Executar em console local/SSH independente do Pórtico, **somente depois de revisão do inventário**, jamais como teste destrutivo no SRV-IA sem janela e autorização próprias:
