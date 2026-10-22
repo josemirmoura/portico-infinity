@@ -40,6 +40,24 @@ def verify_dir(path: Path) -> None:
         raise RevocationError("unsafe root-owned private filecopy state directory")
 
 
+def ensure_state_dir(directory: Path) -> None:
+    parent = directory.parent
+    info = parent.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022):
+        raise RevocationError("unsafe root-owned filecopy state parent")
+    try:
+        directory.mkdir(mode=0o700)
+        fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        pass
+    verify_dir(directory)
+
+
 def read_record(directory: Path, name: str) -> dict:
     # Open relative to a verified directory, never follow symlinks or read
     # unbounded JSON. The operator uses the exact on-disk job identity.
@@ -156,7 +174,8 @@ def verify_operator() -> None:
                 or info.st_mode & 0o022
                 or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))):
             raise RevocationError("unsafe controller ownership")
-    verify_dir(STATE)
+    # State may not exist before the first binary copy. A dry-run must
+    # remain read-only; only a confirmed operator revocation may create it.
 
 
 def main() -> int:
@@ -171,11 +190,16 @@ def main() -> int:
         marker_name(args.subject)
         verify_operator()
         if args.dry_run:
-            jobs = subject_jobs(STATE, args.subject)
+            if STATE.exists() or STATE.is_symlink():
+                verify_dir(STATE)
+                jobs = subject_jobs(STATE, args.subject)
+            else:
+                jobs = []
             print("INFINITY FILECOPY REVOCATION DRY-RUN: matching_jobs=" + str(len(jobs)))
             return 0
         if args.confirm != CONFIRMATION:
             raise RevocationError("explicit independent operator confirmation required")
+        ensure_state_dir(STATE)
         # Durable fence FIRST; never permit new dispatch while scanning jobs.
         created = create_fence(STATE, args.subject)
         jobs = subject_jobs(STATE, args.subject)
