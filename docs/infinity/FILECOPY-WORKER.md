@@ -62,7 +62,11 @@ O `systemd-run` cria unidades **transitórias**, que podem desaparecer em um reb
 - Checkpoint ausente/corrompido, identidade de job inválida, hash malformado ou `LoadState` ambíguo são erros de reconciliação, nunca prova de sucesso.
 - O caso `LoadState=loaded` mantém o classificador anterior, e jobs Compose não sofrem alteração de semântica.
 
-**Limite da prova:** os testes unitários e regressões de unidades desaparecidas verificam o tratamento de evidências; **isso não é um ensaio de reboot real do kernel/hospedeiro**, que continua gate separado a ser executado exclusivamente em VM descartável antes do aceite final.
+**Prova de reboot do guest concluída em 23/10/2026:** [PR #42](https://github.com/josemirmoura/portico-infinity/pull/42) e [GitHub Actions/QEMU](https://github.com/josemirmoura/portico-infinity/actions/runs/39879379953) demonstraram reboot **real do kernel da VM Ubuntu 24.04** (`boot_id` alterado), com worker original `systemd` ativo antes do reset, unidade transitória ausente após, manifesto/checkpoint privados preservados e ausência de replay e publicação parcial. A execução usou QEMU TCG, pois o runner não oferece aceleração KVM. **Não se reiniciou o runner, SRV-IA ou VPS.**
+
+**Proteção pós-reboot adicional:** a [PR #43](https://github.com/josemirmoura/portico-infinity/pull/43) reforça o lifecycle de runtime: mesmo que o serviço transitório desapareça, `deactivate` e `uninstall-runtime` são bloqueados antes de qualquer mutação Docker caso manifestos/checkpoints indiquem execução interrompida, resultado incerto, falta de progresso ou metadados ilegítimos. **8/8 workflows** da PR comprovam os casos positivos e adversariais.
+
+**Limites ainda abertos:** o ensaio QEMU valida kernel real + worker real e persistência de filesystem, mas não toda a cadeia pós-reboot Gateway/OAuth/Broker/SQLite em VM reiniciada; sessões humanas, restore/rollback integral, limpeza total do Infinity e homologação operacional sob autorização continuam gates separados antes de UAT/GO.
 
 ## Ciclo do job
 
