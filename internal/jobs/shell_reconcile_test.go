@@ -78,3 +78,41 @@ func TestReconcilerRespectsYoungForeignAndUnexpiredJobs(t *testing.T) {
         t.Fatalf("expected intact jobs: active=%+v err=%v",active,err)
     }
 }
+
+
+type cancelRaceRunner struct {
+    fakeRunner
+    store *state.Store
+}
+func (f *cancelRaceRunner) Cancel(ctx context.Context, job Job) error {
+    code:=0
+    return f.store.UpdateJobState(ctx,job.ID,"done","completed during cancel",&code)
+}
+
+func TestCancellationCannotOverwriteTerminalResult(t *testing.T) {
+    ctx:=context.Background()
+    db,err:=state.Open(":memory:")
+    if err!=nil { t.Fatal(err) }
+    defer db.Close()
+    addOldJob(t,db,"shell-cancel-terminal","shell.exec",time.Now().Add(time.Minute))
+    code:=0
+    if err:=db.UpdateJobState(ctx,"shell-cancel-terminal","done","completed",&code); err!=nil {t.Fatal(err)}
+    runner:=&fakeRunner{}
+    m:=&Manager{State:db,Runner:runner}
+    if err:=m.Cancel(ctx,"alice","shell-cancel-terminal"); err==nil {
+        t.Fatal("terminal job was cancellable")
+    }
+    if runner.cancelled {t.Fatal("terminal systemd unit was contacted")}
+    r,err:=db.GetJob(ctx,"shell-cancel-terminal")
+    if err!=nil || r.State!="done" || r.ExitCode==nil || *r.ExitCode!=0 {t.Fatalf("record=%+v err=%v",r,err)}
+
+    addOldJob(t,db,"shell-cancel-race","shell.exec",time.Now().Add(time.Minute))
+    m.Runner=&cancelRaceRunner{store:db}
+    if err:=m.Cancel(ctx,"alice","shell-cancel-race"); err==nil {
+        t.Fatal("late concurrent completion was overwritten")
+    }
+    r,err=db.GetJob(ctx,"shell-cancel-race")
+    if err!=nil || r.State!="done" || r.ExitCode==nil || *r.ExitCode!=0 {
+        t.Fatalf("concurrent terminal state corrupted: %+v err=%v",r,err)
+    }
+}
