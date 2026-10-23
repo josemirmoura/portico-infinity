@@ -18,7 +18,7 @@ import sys
 
 CONTROLLER = Path("/srv/portico-infinity")
 FILECOPY_STATE = CONTROLLER / "state/filecopy-jobs"
-FILECOPY_JOB = re.compile(r"vps-agent-filecopy-[0-9a-f]{32}\\Z")
+FILECOPY_JOB = re.compile(r"vps-agent-filecopy-[0-9a-f]{32}\Z")
 PROJECT = "portico-infinity"
 SERVICES = frozenset({
     "gateway", "broker", "operator-portal",
