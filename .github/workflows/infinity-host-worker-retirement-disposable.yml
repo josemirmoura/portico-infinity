@@ -1,0 +1,109 @@
+name: infinity-host-worker-retirement-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-host-worker-lifecycle.py'
+      - 'scripts/infinity-uninstall-local.py'
+      - 'tests/scripts/test_infinity_host_worker_lifecycle.py'
+      - 'tests/scripts/test_infinity_uninstall_local.py'
+      - '.github/workflows/infinity-host-worker-retirement-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  actual-systemd-worker-retirement:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fail-closed unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          python3 -m py_compile scripts/infinity-host-worker-lifecycle.py scripts/infinity-uninstall-local.py
+          python3 -m unittest -v tests/scripts/test_infinity_host_worker_lifecycle.py
+          python3 -m unittest -v tests/scripts/test_infinity_uninstall_local.py
+
+      - name: Real root-owned worker and transient systemd job on disposable host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          test ! -e /usr/local/libexec/portico-infinity/portico-filecopy-worker
+          unit="vps-agent-filecopy-$(printf '%s' "$GITHUB_RUN_ID" | sha256sum | cut -c1-32).service"
+          [[ "$unit" =~ ^vps-agent-filecopy-[a-f0-9]{32}[.]service$ ]]
+          cleanup() {
+            set +e
+            sudo systemctl stop "$unit" >/dev/null 2>&1 || true
+            sudo systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+            sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
+            sudo rmdir /usr/local/libexec/portico-infinity >/dev/null 2>&1 || true
+            sudo rm -rf -- /srv/portico-infinity
+          }
+          trap cleanup EXIT
+          sudo install -d -o root -g root -m 0755 /srv/portico-infinity/scripts
+          sudo install -d -o root -g root -m 0700 /srv/portico-infinity/state/filecopy-jobs
+          sudo install -o root -g root -m 0644 scripts/infinity-lifecycle.py \
+            /srv/portico-infinity/scripts/infinity-lifecycle.py
+          sudo install -o root -g root -m 0644 scripts/infinity-host-worker-lifecycle.py \
+            /srv/portico-infinity/scripts/infinity-host-worker-lifecycle.py
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/portico-filecopy-worker" \
+            ./cmd/portico-filecopy-worker
+          sudo install -d -o root -g root -m 0755 /usr/local/libexec/portico-infinity
+          sudo install -o root -g root -m 0755 "$RUNNER_TEMP/portico-filecopy-worker" \
+            /usr/local/libexec/portico-infinity/portico-filecopy-worker
+          cd /srv/portico-infinity
+          bin=/usr/local/libexec/portico-infinity/portico-filecopy-worker
+          digest="$(sudo sha256sum "$bin" | cut -d' ' -f1)"
+          [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+          sudo python3 scripts/infinity-host-worker-lifecycle.py --inspect > /tmp/infinity-worker-inventory.txt
+          sudo grep -q "$digest" /tmp/infinity-worker-inventory.txt
+
+          sudo systemd-run --unit="${unit%.service}" --no-block --quiet \
+            --property=Type=oneshot --property=RemainAfterExit=yes \
+            /usr/bin/sleep 90
+          for i in $(seq 1 80); do
+            if systemctl is-active --quiet "$unit"; then break; fi
+            sleep 0.1
+          done
+          test "$(systemctl show "$unit" -p ActiveState --value)" = activating
+          if sudo python3 scripts/infinity-host-worker-lifecycle.py --remove-worker \
+            --expected-sha256 "$digest" \
+            --confirm "REMOVE-INFINITY-HOST-WORKER-${digest:0:20}" >/dev/null 2>&1; then
+            echo "active systemd service failed to block host worker teardown" >&2
+            exit 1
+          fi
+          sudo test -f "$bin"
+          sudo systemctl stop "$unit"
+          sudo systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+          for i in $(seq 1 80); do
+            if test "$(systemctl show "$unit" -p LoadState --value)" = not-found; then break; fi
+            sleep 0.25
+          done
+          test "$(systemctl show "$unit" -p LoadState --value)" = not-found
+          if sudo python3 scripts/infinity-host-worker-lifecycle.py --remove-worker \
+            --expected-sha256 "$digest" --confirm BAD >/dev/null 2>&1; then
+            echo "invalid confirmation incorrectly accepted" >&2
+            exit 1
+          fi
+          sudo test -f "$bin"
+          sudo python3 scripts/infinity-host-worker-lifecycle.py --remove-worker \
+            --expected-sha256 "$digest" \
+            --confirm "REMOVE-INFINITY-HOST-WORKER-${digest:0:20}"
+          sudo test ! -e "$bin"
+          sudo python3 scripts/infinity-host-worker-lifecycle.py --inspect
+          sudo python3 scripts/infinity-host-worker-lifecycle.py --remove-worker
+          sudo test -d /srv/portico-infinity/state/filecopy-jobs
+          sudo test -f /srv/portico-infinity/scripts/infinity-lifecycle.py
+          echo 'INFINITY_REAL_SYSTEMD_HOST_WORKER_SHA_BOUND_REMOVAL_NO_FOREIGN_RESOURCE_DAMAGE: PASS'

@@ -98,6 +98,15 @@ class UninstallLocalTests(unittest.TestCase):
             with self.assertRaisesRegex(MOD.LocalRemovalBlocked,"already exists"):
                 MOD.write_intent(root,"synthetic-only",{"test":False})
 
+    def test_local_controller_removal_blocks_installed_host_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker=Path(directory)/"portico-filecopy-worker"
+            worker.write_bytes(b"synthetic executable must not become orphaned")
+            with self.assertRaisesRegex(MOD.LocalRemovalBlocked,"worker remains installed"):
+                MOD.require_host_worker_retired(worker)
+            worker.unlink()
+            self.assertIsNone(MOD.require_host_worker_retired(worker))
+
     def test_no_unrestricted_host_deletion_or_external_teardown(self):
         txt=SOURCE.read_text(encoding="utf-8")
         for forbidden in ("rm -rf /opt","wg-quick","ufw delete","docker system prune",
