@@ -94,8 +94,8 @@ jobs:
             --confirm BACKUP-INFINITY-BEFORE-UNINSTALL
           sudo python3 scripts/infinity-uninstall-backup.py --verify "$job"
           archive="$lab/infinity-uninstall-$job.tar"
-          test "$(stat -c %a "$archive")" = 600
-          test "$(stat -c %a "$archive.json")" = 600
+          test "$(sudo stat -c %a "$archive")" = 600
+          test "$(sudo stat -c %a "$archive.json")" = 600
           restore="/tmp/infinity-restore-$GITHUB_RUN_ID"
           sudo install -d -o root -g root -m 0700 "$restore"
           sudo tar -xf "$archive" -C "$restore"
