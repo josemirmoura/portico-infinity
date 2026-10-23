@@ -1,0 +1,109 @@
+name: infinity-uninstall-private-backup-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-uninstall-backup.py'
+      - 'scripts/infinity-lifecycle.py'
+      - 'tests/scripts/test_infinity_uninstall_backup.py'
+      - '.github/workflows/infinity-uninstall-private-backup-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-owner-backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Synthetic negative tests and Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          python3 -m py_compile scripts/infinity-uninstall-backup.py
+          python3 -m unittest -v tests/scripts/test_infinity_uninstall_backup.py
+      - name: Independent disposable Docker and private backup/restore fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test ! -e /srv/portico-infinity
+          test ! -e /var/backups/portico-infinity
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          lab="/var/backups/portico-infinity"
+          controller="/srv/portico-infinity"
+          job="runner-$GITHUB_RUN_ID"
+          [[ "$job" =~ ^runner-[0-9]{1,24}$ ]]
+          cleanup() {
+            set +e
+            if test -d "$controller"; then
+              (cd "$controller" && sudo docker compose -p portico-infinity down -v --remove-orphans) >/dev/null 2>&1 || true
+            fi
+            docker rm -f unrelated-full-backup-fixture >/dev/null 2>&1 || true
+            sudo rm -rf -- "/tmp/infinity-restore-$GITHUB_RUN_ID"
+            sudo rm -rf -- "$controller"
+            sudo rm -rf -- "$lab"
+          }
+          trap cleanup EXIT
+
+          sudo install -d -o root -g root -m 0755 "$controller/scripts"
+          sudo install -d -o root -g root -m 0700 "$lab"
+          sudo install -o root -g root -m 0644 scripts/infinity-lifecycle.py "$controller/scripts/infinity-lifecycle.py"
+          sudo install -o root -g root -m 0644 scripts/infinity-uninstall-backup.py "$controller/scripts/infinity-uninstall-backup.py"
+          sudo tee "$controller/compose.yaml" >/dev/null <<'YAML'
+          name: portico-infinity
+          services:
+            zitadel-postgres:
+              image: alpine:3.21
+              command: ["sleep", "3600"]
+              volumes:
+                - zitadel-postgres-data:/var/lib/postgresql/data
+          volumes:
+            zitadel-postgres-data:
+          YAML
+          sudo chown root:root "$controller/compose.yaml"
+          sudo chmod 0600 "$controller/compose.yaml"
+          sudo sh -c "printf 'synthetic-only-ci-private-config\n' > '$controller/.env'"
+          sudo chmod 0600 "$controller/.env"
+          (cd "$controller" && sudo docker compose -p portico-infinity up -d)
+          container="$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          test -n "$container"
+          docker exec "$container" sh -c 'printf "synthetic-only-ci-identity-data\n" > /var/lib/postgresql/data/identity-fixture'
+          docker run -d --name unrelated-full-backup-fixture alpine:3.21 sleep 3600
+          (cd "$controller" && sudo docker compose -p portico-infinity stop)
+
+          cd "$controller"
+          sudo python3 scripts/infinity-uninstall-backup.py --inspect >/tmp/infinity-private-inspect.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('/tmp/infinity-private-inspect.json'))
+          assert x['destruction_authorized'] is False
+          assert x['private_volumes']==['portico-infinity_zitadel-postgres-data']
+          assert len(x['external_manual_gates']) >= 4
+          print('PRIVATE FULL-UNINSTALL INVENTORY ONLY: PASS')
+          PY
+          if sudo python3 scripts/infinity-uninstall-backup.py --backup "$job" >/dev/null 2>&1; then
+            echo "backup without owner confirmation was accepted" >&2
+            exit 1
+          fi
+          sudo python3 scripts/infinity-uninstall-backup.py --backup "$job" \
+            --confirm BACKUP-INFINITY-BEFORE-UNINSTALL
+          sudo python3 scripts/infinity-uninstall-backup.py --verify "$job"
+          archive="$lab/infinity-uninstall-$job.tar"
+          test "$(sudo stat -c %a "$archive")" = 600
+          test "$(sudo stat -c %a "$archive.json")" = 600
+          restore="/tmp/infinity-restore-$GITHUB_RUN_ID"
+          sudo install -d -o root -g root -m 0700 "$restore"
+          sudo tar -xf "$archive" -C "$restore"
+          sudo grep -qx 'synthetic-only-ci-private-config' "$restore/controller/.env"
+          sudo grep -qx 'synthetic-only-ci-identity-data' \
+            "$restore/volumes/portico-infinity_zitadel-postgres-data/identity-fixture"
+          test "$(docker inspect unrelated-full-backup-fixture -f '{{.State.Running}}')" = true
+          test -n "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          echo 'ISOLATED FULL-UNINSTALL PRIVATE BACKUP SHA + ACTUAL RESTORE OF CONFIG AND IDENTITY: PASS'
+          # Reproves that the backup script NEVER removes the original volume.
+          test -n "$(docker volume ls -q --filter label=com.docker.compose.project=portico-infinity)"
