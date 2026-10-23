@@ -1,0 +1,49 @@
+name: infinity-filecopy-qemu-real-reboot-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'internal/broker/filecopy_jobs.go'
+      - 'internal/broker/filecopy_jobs_test.go'
+      - 'internal/filecopyworker/**'
+      - 'scripts/infinity-filecopy-qemu-reboot-e2e.sh'
+      - '.github/workflows/infinity-filecopy-qemu-real-reboot-disposable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-guest-kernel-reboot:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Preflight exact disposable runner, Bash syntax and no live controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          test ! -L /srv/portico-infinity
+          bash -n scripts/infinity-filecopy-qemu-reboot-e2e.sh
+          go test -count=1 ./internal/broker -run 'Test(ReconcileFilecopyAfterTransientUnitDisappears|TransientFilecopyRebootCannotBeMisreadAsSuccess)'
+      - name: Ubuntu 24.04 QEMU/KVM real guest kernel reset + original systemd worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/infinity-filecopy-qemu-reboot-e2e.sh
+      - name: Persist sanitized guest kernel reboot evidence
+        if: always()
+        shell: bash
+        run: |
+          echo "Run: $GITHUB_RUN_ID"
+          echo "Commit: $GITHUB_SHA"
+          echo "Real kernel boot-id, stopped typed worker, lost transient systemd unit, durable checkpoint and no-replay MUST all pass in preceding step."
+          echo "No host SRV-IA/VPS/Community resources accessed."
