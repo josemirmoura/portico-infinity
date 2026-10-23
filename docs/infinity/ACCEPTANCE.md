@@ -1,5 +1,26 @@
 # Gates de aceite: Pórtico Infinity
 
+## Teto físico personalizado: isolamento do shell
+
+O instalador `scripts/install-infinity.sh --scope CAMINHO` já permite que
+o operador escolha uma raiz existente e segura, sendo `/opt` o padrão.
+A análise do Broker identificou uma incompatibilidade: o shell isolado
+exigia um CWD em `/opt` mesmo com teto físico alternativo autorizado.
+
+A correção no helper `infinityShellWorkspaceRoots` usa
+`VPS_AGENT_PHYSICAL_SCOPE_ROOT` validado, exige diretório de trabalho
+estritamente abaixo dele e preserva o isolamento por *bind mount* apenas
+do projeto selecionado, bem como a máscara de `.env` dentro do projeto.
+Os testes em host sintético cobrem `/opt` e `/mnt/portico-ci`, caminhos
+fora do teto, travessia/symlinks, raiz inteira e sobreposição ao controlador
+`/srv/portico-infinity`. A política do Community mantém seu comportamento
+legado.
+
+**Limite de evidência:** testes unitários + CI do helper ainda não
+substituem uma instalação limpa e E2E de shell com teto alternativo em VM
+descartável. Também não autorizam alteração do escopo operacional do SRV-IA.
+
+
 ## Bloqueio preventivo do publicador herdado
 
 O workflow `.github/workflows/release.yml` veio do Pórtico Community e publica tags,
