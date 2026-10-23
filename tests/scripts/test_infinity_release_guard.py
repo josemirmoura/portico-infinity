@@ -5,6 +5,7 @@ the inherited pipeline must never publish Infinity packages or tags.
 """
 from pathlib import Path
 import os
+import re
 import subprocess
 import unittest
 
@@ -18,7 +19,9 @@ def job_section(source: str, job: str) -> str:
     marker = f"  {job}:\n"
     if marker not in source:
         raise AssertionError(f"missing release job: {job}")
-    return source.split(marker, 1)[1].split("\n  ", 1)[0]
+    tail = source.split(marker, 1)[1]
+    match = re.search(r"(?m)^  [A-Za-z][A-Za-z0-9_-]*:\s*$", tail)
+    return tail[:match.start()] if match else tail
 
 
 class InheritedReleaseGateTests(unittest.TestCase):
