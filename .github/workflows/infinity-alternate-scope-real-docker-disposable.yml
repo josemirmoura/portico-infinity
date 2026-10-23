@@ -123,6 +123,9 @@ jobs:
             echo "CI shell proof failed: inspected only synthetic transient job state" >&2
             sudo systemctl list-units --all --no-pager 'vps-agent-job-*' || true
             sudo journalctl --no-pager --lines=60 -u 'vps-agent-job-*' --output=short || true
+            sudo systemctl --failed --all --no-pager || true
+            sudo journalctl --no-pager -p warning --since '-5 min' --lines=70 --output=short || true
+            findmnt -T "$SCOPE/project" -o TARGET,FSTYPE,OPTIONS || true
             exit 1
           fi
           sudo test ! -e /opt/alt-scope-escape
