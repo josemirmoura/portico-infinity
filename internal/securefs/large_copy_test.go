@@ -72,3 +72,41 @@ func TestBinaryStreamDenyOverwriteMismatchAndCancel(t *testing.T) {
 		t.Fatal("symlink source must be rejected")
 	}
 }
+
+
+func TestBinaryStreamSourcePathSwapDuringFinalProgressNeverPublishes(t *testing.T) {
+    for _, swap := range []string{"replacement", "symlink"} {
+        t.Run(swap, func(t *testing.T) {
+            root := t.TempDir()
+            m, err := New([]string{root}, []string{root}, DefaultMaxBytes)
+            if err != nil { t.Fatal(err) }
+            src := filepath.Join(root, "source.gguf")
+            retired := filepath.Join(root, "retired.gguf")
+            dst := filepath.Join(root, "destination.gguf")
+            // Three 1 MiB chunks, with path swap in the final progress hook.
+            if err := os.WriteFile(src, bytes.Repeat([]byte("a"), 3<<20), 0600); err != nil {
+                t.Fatal(err)
+            }
+            swapped := false
+            _, err = m.CopyFileStream(context.Background(), src, dst, 10<<20, "",
+                func(done, total int64) error {
+                    if done != total { return nil }
+                    swapped = true
+                    if err := os.Rename(src, retired); err != nil { return err }
+                    if swap == "symlink" { return os.Symlink(retired, src) }
+                    return os.WriteFile(src, bytes.Repeat([]byte("b"), 3<<20), 0600)
+                })
+            if !swapped { t.Fatal("source path swap was never executed during copy") }
+            if err == nil { t.Fatal("replaced source pathname unexpectedly published destination") }
+            if _, statErr := os.Stat(dst); !errors.Is(statErr, os.ErrNotExist) {
+                t.Fatalf("destination must not be published after source swap: %v", statErr)
+            }
+            temporary, err := filepath.Glob(filepath.Join(root, ".destination.gguf.binary-copy-*"))
+            if err != nil { t.Fatal(err) }
+            if len(temporary) != 0 { t.Fatalf("temporary copy files left behind: %v", temporary) }
+            if _, err := os.Stat(retired); err != nil {
+                t.Fatalf("original pinned source must be left untouched: %v", err)
+            }
+        })
+    }
+}
