@@ -1788,8 +1788,12 @@ func (b *Broker) mkdir(ctx context.Context, req wire.Request, fs *securefs.Manag
 	var in struct {
 		ForShell bool `json:"for_shell"`
 	}
-	if err := json.Unmarshal(req.Args, &in); err != nil {
-		return deny(req.ID, "invalid_args", err.Error())
+	// Older clients send no args at all for plain file.mkdir. Nil input
+	// means for_shell=false; do not break the existing Community/Infinity API.
+	if len(req.Args) > 0 {
+		if err := json.Unmarshal(req.Args, &in); err != nil {
+			return deny(req.ID, "invalid_args", err.Error())
+		}
 	}
 	var shellUID, shellGID int
 	if in.ForShell {
