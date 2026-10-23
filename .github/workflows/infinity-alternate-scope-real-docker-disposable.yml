@@ -47,7 +47,7 @@ jobs:
             exit 1
           fi
           sudo install -d -o root -g root -m 0755 /data
-          sudo install -d -o root -g root -m 0755 "$SCOPE"
+          sudo install -d -o root -g root -m 0755 /var/lib "$SCOPE"
           sudo install -d -o portico-infinity-exec -g portico-infinity-exec -m 0755 "$SCOPE/project" "$SCOPE/sibling"
           printf 'ALT_CI_SECRET=synthetic-only\n' | sudo tee "$SCOPE/project/.env" >/dev/null
           printf 'ALT_SIBLING_SECRET=synthetic-only\n' | sudo tee "$SCOPE/sibling/.env" >/dev/null
