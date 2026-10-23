@@ -156,7 +156,7 @@ def audit(*, policy: Path=POLICY, trusted=False) -> dict:
 
 
 def main():
-    parser=argparse.ArgumentParser(description="Read-only Infinity executor account inventory (never userdel)")
+    parser=argparse.ArgumentParser(description="Read-only Infinity executor account inventory; never changes host users")
     parser.add_argument("--inspect",action="store_true",required=True)
     args=parser.parse_args()
     try:
