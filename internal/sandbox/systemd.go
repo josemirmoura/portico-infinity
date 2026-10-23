@@ -50,11 +50,15 @@ func BuildSystemdRunArgs(s Spec) ([]string, error) {
 
 	args := []string{
 		"--unit=" + s.Unit,
-		"--collect",
+		// Preserve the terminal systemd result until job.status persists it in
+		// SQLite. --collect would erase fast-failing units before polling.
 		"--no-block",
 		"--quiet",
 		"--uid=" + s.User,
 		"--working-directory=" + s.CWD,
+		"--property=Type=oneshot",
+		"--property=RemainAfterExit=yes",
+		"--property=TimeoutStartSec=" + strconv.FormatInt(int64(s.Runtime.Seconds())+1, 10),
 		"--property=NoNewPrivileges=yes",
 		"--property=ProtectHome=yes",
 		"--property=ProtectProc=invisible",
