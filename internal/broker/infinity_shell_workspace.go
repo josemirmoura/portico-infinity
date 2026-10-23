@@ -10,13 +10,13 @@ import (
 )
 
 // infinityShellWorkspaceRoots limits a non-root Infinity shell to the one
-// workspace selected by its cwd. Generic file tools retain the full /opt scope.
+// workspace selected by its cwd. Generic file tools retain the full configured
+// physical filesystem ceiling (default /opt).
 //
-// A shell cannot safely mask secrets by scanning all of /opt on every launch:
-// installations routinely exceed DefaultScanLimit, and mounting more of /opt
-// than we have scanned would expose any protected material in those siblings.
-// Instead, mount exactly the tree that was scanned. This boundary is specific
-// to the isolated Infinity shell; Community and privileged tools are unchanged.
+// A shell cannot safely mask secrets by scanning an entire large ceiling on
+// every launch. Mount exactly the selected tree that was scanned, independent
+// of whether the operator chose /opt or another validated physical root.
+// Community and privileged tools remain unchanged.
 func infinityShellWorkspaceRoots(cwd string, isolated bool, readRoots, writeRoots []string) ([]string, []string, error) {
 	protectedRoot, invalid := infinityProtectedRoot()
 	if invalid {
@@ -25,9 +25,18 @@ func infinityShellWorkspaceRoots(cwd string, isolated bool, readRoots, writeRoot
 	if protectedRoot == "" || !isolated {
 		return readRoots, writeRoots, nil
 	}
+	physical := os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT")
+	if !filepath.IsAbs(physical) || physical == "/" || filepath.Clean(physical) != physical {
+		return nil, nil, errors.New("Infinity shell physical scope must be an explicit canonical directory")
+	}
+	// Reject a misconfigured ceiling that could encompass (or sit inside)
+	// Infinity's protected controller, regardless of file-policy claims.
+	if pathWithinRoot(physical, protectedRoot) || pathWithinRoot(protectedRoot, physical) {
+		return nil, nil, errors.New("Infinity shell physical scope overlaps the protected controller")
+	}
 	if !filepath.IsAbs(cwd) || filepath.Clean(cwd) != cwd ||
-		cwd == "/opt" || !pathWithinRoot("/opt", cwd) {
-		return nil, nil, errors.New("Infinity shell requires a project directory strictly below /opt")
+		cwd == physical || !pathWithinRoot(physical, cwd) {
+		return nil, nil, errors.New("Infinity shell requires a project directory strictly below the configured physical scope")
 	}
 
 	// Refuse an existing symlink at any workspace component. The transient
@@ -41,7 +50,7 @@ func infinityShellWorkspaceRoots(cwd string, isolated bool, readRoots, writeRoot
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return nil, nil, errors.New("Infinity shell workspace contains a non-directory or symlink")
 		}
-		if part == "/opt" {
+		if part == physical {
 			break
 		}
 	}
