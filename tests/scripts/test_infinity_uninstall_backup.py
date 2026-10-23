@@ -45,6 +45,9 @@ class FakeLifecycle:
     def _ids(data):
         return [s for s in data.splitlines() if s]
 
+    def run(self, args):
+        return self.command(args)
+
     def command(self, args):
         self.calls.append(tuple(args))
         if args[:3] == ["docker", "volume", "inspect"]:
@@ -81,7 +84,8 @@ class BackupSafetyTests(unittest.TestCase):
             self.assertEqual(len(snapshot["volumes"]), 1)
             self.assertEqual(snapshot["external_gates"][0][:10], "VPS bridge")
             self.assertTrue(all(args[1] in ("volume", "ps") for args in self.life.calls))
-            self.assertNotIn("rm", repr(self.life.calls))
+            self.assertFalse(any("rm" in args or "stop" in args or "update" in args
+                                 for args in self.life.calls))
 
     def test_invalid_docker_mountpoint_aborts_closed(self):
         self.life.mount = "/tmp/foreign/project"
