@@ -98,6 +98,12 @@ class RootConsumerInventoryTests(unittest.TestCase):
             with self.assertRaises(inv.InventoryIncomplete):
                 inv.list_units()
 
+    def test_failed_unit_bullet_is_not_mistaken_for_a_unit_name(self):
+        with mock.patch.object(inv, "run_systemctl",
+                               return_value="● failed.service loaded failed failed\\n"
+                                            "normal.service loaded active running\\n"):
+            self.assertEqual(inv.list_units(), ["failed.service", "normal.service"])
+
     def test_physical_scope_validation(self):
         for bad in ("/", "/etc", "opt", "/opt/../etc", "/opt/", "/srv"):
             with self.subTest(bad=bad):
