@@ -298,7 +298,16 @@ func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
     if err := status(dir, id, "running", 0, 0, ""); err != nil { return "", err }
     selected := manifest.selectedScope()
     fs, err := securefs.NewWithHostRoot([]string{selected}, []string{selected}, securefs.DefaultMaxBytes, hostRoot)
-    if err != nil { return "", err }
+    if err != nil {
+        // Initialization failed before any destination bytes were written.
+        // Do not leave a misleading durable "running" checkpoint forever.
+        // If the terminal status itself cannot be committed, preserve the
+        // uncertain state for explicit operator reconciliation.
+        if checkpointErr := status(dir, id, "failed", 0, 0, ""); checkpointErr != nil {
+            return "", fmt.Errorf("filecopy workspace initialization failed (%v); terminal status unavailable: %w", err, checkpointErr)
+        }
+        return "", fmt.Errorf("filecopy workspace initialization failed before transfer: %w", err)
+    }
     var lastDone, lastTotal, recorded int64
     lastReport := time.Now()
     var progressErr error
