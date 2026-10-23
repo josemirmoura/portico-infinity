@@ -21,6 +21,7 @@ import sys
 CONTROLLER = Path("/srv/portico-infinity")
 BACKUP_SCRIPT = CONTROLLER / "scripts/infinity-uninstall-backup.py"
 BACKUP_ROOT = Path("/var/backups/portico-infinity")
+HOST_WORKER = Path("/usr/local/libexec/portico-infinity/portico-filecopy-worker")
 
 
 class LocalRemovalBlocked(RuntimeError):
@@ -62,8 +63,15 @@ def inspect_mounts(controller: Path = CONTROLLER, mountinfo: Path = Path("/proc/
                 raise LocalRemovalBlocked("mounted filesystem beneath Infinity controller")
 
 
+def require_host_worker_retired(worker: Path = HOST_WORKER) -> None:
+    """Retire the privileged host executable before erasing its controller."""
+    if worker.exists() or worker.is_symlink():
+        raise LocalRemovalBlocked("privileged host filecopy worker remains installed: decommission it separately before local uninstall")
+
+
 def prepare(backup, label: str, command=None):
     backup.require_context()
+    require_host_worker_retired()
     journal = backup.verify_backup(label)
     current = backup.validated_snapshot(command)
     if journal.get("inventory_sha256") != backup.snapshot_signature(current):
@@ -149,6 +157,7 @@ def verify_volume_before_remove(backup, item: dict, command) -> None:
 def local_remove(backup, label: str, journal: dict, snapshot: dict, *,
                  command=None) -> dict:
     command = command or backup.life.run
+    require_host_worker_retired()
     if backup.validated_snapshot(command) != snapshot:
         raise LocalRemovalBlocked("inventory changed between confirmation and deletion")
     backup.life.ensure_no_active_workers(command)
