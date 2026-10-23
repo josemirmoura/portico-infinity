@@ -29,8 +29,8 @@ test "$1" = --setup
 test ! -e "$LAB"
 umask 077
 install -d -m 0700 "$LAB" "$LAB/config" "$LAB/state"
-install -m 0600 /tmp/ci-compose.yaml "$LAB/compose.yaml"
-install -m 0600 /tmp/ci-auth.yaml "$LAB/compose.integrated-auth.yaml"
+install -m 0600 /tmp/compose.yaml "$LAB/compose.yaml"
+install -m 0600 /tmp/compose.integrated-auth.yaml "$LAB/compose.integrated-auth.yaml"
 printf 'version: 1\nmode: scoped\n' > "$LAB/config/policy.yaml"
 cat > "$LAB/ci.yml" <<'YAML'
 services:
