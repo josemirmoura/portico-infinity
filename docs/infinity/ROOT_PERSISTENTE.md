@@ -42,6 +42,35 @@ Isso atende à maior parte das tarefas de desenvolvimento, criação, edição, 
 
 O isolamento implementável consiste em **não conceder root genérico** e expor operações previamente definidas, cujos caminhos são validados pelo Broker. Os mecanismos de resolução seguros (por exemplo `openat2`, `RESOLVE_BENEATH`, `RESOLVE_NO_MAGICLINKS` e operações por descritor) servem para evitar travessia de caminhos, *não* para transformar um processo root arbitrário em root restrito.
 
+### Inventário preventivo de consumidores privilegiados (laboratório, pré-UAT)
+
+O Pórtico **não garante** que um arquivo dentro do teto não seja lido ou
+executado depois por um serviço com privilégios globais. O comando somente
+de leitura `scripts/infinity-root-consumer-inventory.py` inspeciona metadados
+tipados de unidades `systemd` e marca referências literais a arquivos do
+teto em `ExecStart*`, `WorkingDirectory`, `EnvironmentFiles`, caminhos
+de unidades e demais campos relevantes, distinguindo serviços root de não-root.
+
+Em uma futura homologação **especificamente autorizada**, executar no host
+selecionado como operador, **sem privilégios de escrita ou interrupção**:
+
+```bash
+python3 scripts/infinity-root-consumer-inventory.py --scope /opt --strict
+```
+
+Saídas: JSON apenas com nome da unidade, campos encontrados e classificação.
+Não publica comandos, argumentos ou valores de ambiente. Retorno `3` requer
+revisão de consumidores root; `2` significa inventário incompleto e **não é
+PASS**; `0` indica somente ausência de referência direta detectada.
+Não rode automaticamente em serviços reais antes da autorização de UAT.
+
+**Limites:** não detecta uso de caminhos construídos em tempo de execução,
+links indiretos, bibliotecas carregadas por aplicações, cron, containers, hooks,
+scripts privilegiados externos e outras formas de elevação indireta. Um
+resultado sem referências diretas **não** certifica segurança total. O teste
+E2E GitHub Actions utiliza unicamente uma unidade root sintética descartável,
+sem tocar no SRV-IA ou na VPS.
+
 ### Riscos residuais importantes
 
 - Um arquivo editável em `/opt` pode ser consumido **posteriormente por um serviço com privilégios globais**, permitindo impacto fora de `/opt`; isso inclui scripts, automações, unidades de serviço, configurações e hooks. O limite por caminho não protege contra esse efeito indireto.
