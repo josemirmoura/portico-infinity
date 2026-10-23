@@ -146,6 +146,30 @@ func (m *Manager) CopyFileStream(
 		first.Mtim != after.Mtim || first.Ctim != after.Ctim {
 		return "", errors.New("binary-copy source changed during transfer; destination not published")
 	}
+	// The original source FD is pinned, but the *pathname* can be swapped via
+	// rename during a long transfer. Reopen using the original trusted dir FD
+	// and openat2 constraints, then check identity immediately before publish.
+	// Never commit a copy of a stale inode if the requested path now names a
+	// different model file. This is a late validation, not an atomic snapshot
+	// of a concurrently writable directory.
+	currentFD, err := unix.Openat2(srcRootFD, srcRel, &unix.OpenHow{
+		Flags: uint64(unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW),
+		Resolve: resolve,
+	})
+	if err != nil { return "", fmt.Errorf("binary-copy source path changed or became unsafe: %w", err) }
+	var current unix.Stat_t
+	if err := unix.Fstat(currentFD, &current); err != nil {
+		_ = unix.Close(currentFD)
+		return "", fmt.Errorf("cannot revalidate binary-copy source identity: %w", err)
+	}
+	if err := unix.Close(currentFD); err != nil {
+		return "", fmt.Errorf("cannot close revalidated binary-copy source: %w", err)
+	}
+	if current.Dev != first.Dev || current.Ino != first.Ino ||
+		current.Size != first.Size || current.Mtim != first.Mtim ||
+		current.Ctim != first.Ctim {
+		return "", errors.New("binary-copy source pathname changed during transfer; destination not published")
+	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	if expectedSHA256 != "" && !strings.EqualFold(expectedSHA256, sum) {
 		return "", errors.New("binary-copy SHA-256 mismatch; destination not published")
