@@ -42,6 +42,27 @@ Before deployment confirm the domain is unused in any other existing
 router, and confirm trusted TLS certificate resolver and firewall behavior.
 Do not replace the production `traefik` container.
 
+## Desativação e remoção segura da ponte (operador externo ao MCP)
+
+O código `infinity-edge-lifecycle.py` deve ser instalado **junto aos dois arquivos Compose** em `/opt/portico-infinity-edge`, sob `root:root`, sem permissão de escrita para usuários comuns. Ele reconhece exclusivamente o projeto Compose `portico-infinity-edge`, serviço `bridge`, diretório de trabalho, volume bind read-only e a rede externa `traefik-public`.
+
+```bash
+cd /opt/portico-infinity-edge
+sudo python3 infinity-edge-lifecycle.py --dry-run
+
+# Apenas com autorização específica do proprietário:
+sudo python3 infinity-edge-lifecycle.py --deactivate \
+  --confirm DEACTIVATE-INFINITY-EDGE
+
+# Remover SOMENTE o contêiner do projeto, mantendo arquivos e rede compartilhada:
+sudo python3 infinity-edge-lifecycle.py --remove-bridge \
+  --confirm REMOVE-INFINITY-EDGE-BRIDGE
+```
+
+A operação desativa a política de restart e para apenas o contêiner com etiquetas exatas; a remoção elimina apenas esse contêiner. Nenhuma rede ou volume Docker, certificado, DNS, proxy Traefik principal, configuração local, túnel WireGuard, UFW ou recurso do Community/Cloud é removido. É idempotente após remoção. Metadados estrangeiros, mounts novos, portas publicadas ou múltiplos contêineres reivindicando o mesmo projeto fazem a operação **falhar fechada antes da primeira mutação**.
+
+**Limite:** este procedimento é um passo da **desinstalação distribuída**. Encerrar a ponte não implica apagar identidade OAuth, projetos no SRV-IA, conta do executor, firewall, chaves de VPN ou domínio. Esses recursos exigem seus próprios inventários, confirmações externas e ensaios descartáveis. **Nunca executar na VPS operacional sem autorização específica.**
+
 ## Rollback (bridge only)
 
 ```bash
