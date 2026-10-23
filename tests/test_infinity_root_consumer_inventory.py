@@ -137,6 +137,22 @@ class RootConsumerInventoryTests(unittest.TestCase):
             with self.assertRaises(inv.InventoryIncomplete):
                 inv.show_unit("unexpected.service")
 
+    def test_repeated_systemd_commands_are_all_inspected(self):
+        raw = chr(10).join((
+            "Id=portico-ci-test.service", "LoadState=loaded",
+            "ActiveState=active", "User=", "DynamicUser=no",
+            "ExecStart={ path=/usr/bin/true ; argv[]=/usr/bin/true }",
+            "ExecStartPre={ path=/usr/bin/true ; argv[]=/usr/bin/true }",
+            "ExecStartPre={ path=/bin/sh ; argv[]=/bin/sh /opt/root-hook.sh }", ""))
+        with mock.patch.object(inv, "run_systemctl", return_value=raw):
+            props = inv.show_unit("portico-ci-test.service")
+        self.assertEqual(inv.inspect_unit("portico-ci-test.service", props, "/opt")
+                         ["referencing_fields"], ["ExecStartPre"])
+        with mock.patch.object(inv, "run_systemctl", return_value=raw +
+                               "User=nobody" + chr(10)):
+            with self.assertRaises(inv.InventoryIncomplete):
+                inv.show_unit("portico-ci-test.service")
+
     def test_physical_scope_validation(self):
         for bad in ("/", "/etc", "opt", "/opt/../etc", "/opt/", "/srv"):
             with self.subTest(bad=bad):
