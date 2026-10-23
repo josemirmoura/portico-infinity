@@ -119,9 +119,8 @@ class RootConsumerInventoryTests(unittest.TestCase):
             self.assertEqual(inv.list_units(), ["failed.service", "normal.service"])
 
     def test_inactive_not_found_unit_is_reported_as_unloaded(self):
-        raw = ("Id=NetworkManager.service\\n"
-               "LoadState=not-found\\n"
-               "ActiveState=inactive\\n")
+        raw = chr(10).join(("Id=NetworkManager.service", "LoadState=not-found",
+                            "ActiveState=inactive", ""))
         with mock.patch.object(inv, "run_systemctl", return_value=raw):
             unit = inv.show_unit("NetworkManager.service")
         self.assertIsNone(inv.inspect_unit("NetworkManager.service", unit, "/opt"))
@@ -132,9 +131,8 @@ class RootConsumerInventoryTests(unittest.TestCase):
         self.assertEqual(report["systemd_services_inspected"], 0)
 
     def test_active_missing_unit_must_fail_closed(self):
-        raw = ("Id=unexpected.service\\n"
-               "LoadState=not-found\\n"
-               "ActiveState=active\\n")
+        raw = chr(10).join(("Id=unexpected.service", "LoadState=not-found",
+                            "ActiveState=active", ""))
         with mock.patch.object(inv, "run_systemctl", return_value=raw):
             with self.assertRaises(inv.InventoryIncomplete):
                 inv.show_unit("unexpected.service")
