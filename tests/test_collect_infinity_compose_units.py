@@ -7,6 +7,9 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from unittest import mock
+import json
+import os
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "collect-infinity-compose-units.py"
 spec = importlib.util.spec_from_file_location("compose_retention", SCRIPT)
@@ -99,6 +102,61 @@ class ComposeRetentionTests(unittest.TestCase):
             db.close()
             rows = ret.candidates(dbpath, 7, 25)
             self.assertEqual([x["job_id"] for x in rows], ["old-done"])
+
+    def test_sql_snapshot_must_remain_terminal_and_identical(self):
+        with tempfile.TemporaryDirectory() as d:
+            dbpath = Path(d) / "state.db"
+            db = sqlite3.connect(dbpath)
+            db.execute("""CREATE TABLE jobs (
+                job_id TEXT, tool TEXT, resource TEXT, unit_name TEXT,
+                state TEXT, exit_code INTEGER, updated_at INTEGER
+            )""")
+            original = self.job()
+            original["updated_at"] = time.time_ns() - 10 * 86400 * 1_000_000_000
+            db.execute(
+                "INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
+                tuple(original[key] for key in
+                      ("job_id", "tool", "resource", "unit_name", "state", "exit_code", "updated_at")),
+            )
+            db.commit()
+            snapshot = ret.persisted_job(dbpath, original["job_id"])
+            self.assertEqual(snapshot, original)
+            db.execute("UPDATE jobs SET state=?, updated_at=? WHERE job_id=?",
+                       ("running", time.time_ns(), original["job_id"]))
+            db.commit()
+            self.assertNotEqual(ret.persisted_job(dbpath, original["job_id"]), snapshot)
+            db.close()
+            with self.assertRaises(ret.UnsafeJob):
+                ret.persisted_job(dbpath, "../other-service")
+
+    def test_archive_evidence_is_bounded_private_and_dir_synced(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            job = self.job()
+            job["updated_at"] = time.time_ns()
+            log = "safe disposable CI journal event\\n" * 4000
+            raw_fsync = os.fsync
+            with mock.patch.object(ret, "run", return_value=log) as called, \
+                 mock.patch.object(ret.os, "fsync", wraps=raw_fsync) as fsync:
+                ret.archive_job(folder, job, self.unit())
+            called.assert_called_once_with(
+                "journalctl", "--no-pager", "--output=short-iso",
+                "--unit", job["unit_name"], "-n", "150")
+            self.assertEqual(fsync.call_count, 3,
+                             "two files and their containing directory must be fsynced")
+            manifest = folder / (job["job_id"] + ".json")
+            archive = folder / (job["job_id"] + ".log")
+            self.assertTrue(manifest.is_file())
+            self.assertTrue(archive.is_file())
+            self.assertLessEqual(archive.stat().st_size, ret.LOG_LIMIT)
+            self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+            data = json.loads(manifest.read_text())
+            self.assertEqual(data["exit_code"], 0)
+            self.assertEqual(data["state"], "done")
+            self.assertEqual(data["log_bytes"], archive.stat().st_size)
+            with self.assertRaises(ret.UnsafeJob):
+                ret.archive_job(folder, job, self.unit())
 
     def test_archive_outside_opt_and_root_checks(self):
         with self.assertRaises(ret.UnsafeJob):
