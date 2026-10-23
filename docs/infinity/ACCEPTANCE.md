@@ -16,9 +16,9 @@ fora do teto, travessia/symlinks, raiz inteira e sobreposição ao controlador
 `/srv/portico-infinity`. A política do Community mantém seu comportamento
 legado.
 
-**Limite de evidência:** testes unitários + CI do helper ainda não
-substituem uma instalação limpa e E2E de shell com teto alternativo em VM
-descartável. Também não autorizam alteração do escopo operacional do SRV-IA.
+**E2E adicional aprovado (23/10/2026):** [PR #57](https://github.com/josemirmoura/portico-infinity/pull/57), [GitHub Actions #39979840793](https://github.com/josemirmoura/portico-infinity/actions/runs/39979840793), código de teste no commit `76a83b841a6894938e4b005a4a5667e1ec497a95`. Em runner Ubuntu descartável com Docker/Compose reais, o controlador ficou root-owned em `/srv/portico-infinity`; um teto alternativo root-owned em `/data/portico-e2e-<RUN_ID>` foi configurado, validado e exposto ao Broker. O MCP autenticado permitiu CRUD no projeto; o `shell.exec` criou prova real por unidade transitória systemd com identidade não-root; a máscara `.env` legível pelo Unix impediu leitura, e negações de paths fora do teto, symlink, traversal, shell admin e credencial inválida passaram. A auditoria do Broker permaneceu válida.
+
+**Restrição do laboratório:** a primeira escolha `/mnt` encontrou o `mnt.mount` do **runner** em falha porque dependia de `ephemeral0` ausente no ambiente de CI, não por causa da política Infinity; o teste foi corrigido para usar `/data` sob controle root do runner e passou. Isso **não** equivale a homologar `/mnt` em todos os hosts ou o instalador guiado público OAuth/HTTPS no mesmo cenário, nem autoriza migração do teto operacional do SRV-IA.
 
 
 ## Bloqueio preventivo do publicador herdado
