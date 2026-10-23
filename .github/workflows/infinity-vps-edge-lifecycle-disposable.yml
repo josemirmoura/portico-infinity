@@ -1,0 +1,112 @@
+name: infinity-vps-edge-lifecycle-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/infinity-vps-edge/infinity-edge-lifecycle.py'
+      - 'deploy/infinity-vps-edge/compose.yaml'
+      - 'tests/scripts/test_infinity_edge_lifecycle.py'
+      - '.github/workflows/infinity-vps-edge-lifecycle-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  edge-bridge-lifecycle:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail-closed fake Docker and syntax regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          python3 -m py_compile deploy/infinity-vps-edge/infinity-edge-lifecycle.py
+          python3 -m unittest -v tests/scripts/test_infinity_edge_lifecycle.py
+
+      - name: Test actual Traefik bridge deactivation/removal without touching shared resources
+        shell: bash
+        env:
+          INFINITY_PUBLIC_DOMAIN: ci.example.invalid
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          root=/opt/portico-infinity-edge
+          test ! -e "$root"
+          test ! -L "$root"
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity-edge)"
+          if docker network inspect traefik-public >/dev/null 2>&1; then
+            echo "shared network already exists; cannot use safe disposable fixture" >&2
+            exit 1
+          fi
+          cleanup() {
+            set +e
+            if test -d "$root"; then
+              (cd "$root" && sudo --preserve-env=INFINITY_PUBLIC_DOMAIN docker compose \
+                -p portico-infinity-edge down) >/dev/null 2>&1 || true
+            fi
+            docker rm -f foreign-edge-traefik-parent foreign-edge-service >/dev/null 2>&1 || true
+            docker network rm traefik-public >/dev/null 2>&1 || true
+            sudo rm -rf -- "$root"
+          }
+          trap cleanup EXIT
+          # GitHub-hosted Ubuntu exposes /opt as root-owned mode 0777;
+          # production preflight must REJECT that unsafe ancestor. Repair
+          # permissions only on this disposable runner, never in production.
+          test "$(stat -c %u:%g /opt)" = "0:0"
+          sudo chmod go-w /opt
+          test "$(stat -c %a /opt)" = 755
+          sudo install -d -o root -g root -m 0755 "$root"
+          for name in compose.yaml infinity-upstreams.yml infinity-edge-lifecycle.py; do
+            sudo install -o root -g root -m 0644 "deploy/infinity-vps-edge/$name" "$root/$name"
+          done
+          # Detect unexpected hosted-runner base permissions, without
+          # disclosing config, domain, tokens or private Docker mounts.
+          stat -c '%a %u:%g %n' / /opt "$root" "$root/compose.yaml" \
+            "$root/infinity-upstreams.yml" "$root/infinity-edge-lifecycle.py"
+          before="$(sudo sha256sum "$root/compose.yaml" "$root/infinity-upstreams.yml")"
+          docker network create traefik-public >/dev/null
+          docker run -d --name foreign-edge-traefik-parent \
+            --network traefik-public alpine:3.21 sleep 3600 >/dev/null
+          docker run -d --name foreign-edge-service \
+            --network traefik-public alpine:3.21 sleep 3600 >/dev/null
+          network_before="$(docker network inspect traefik-public --format '{{.Id}}')"
+          cd "$root"
+          sudo --preserve-env=INFINITY_PUBLIC_DOMAIN docker compose -p portico-infinity-edge config -q
+          sudo --preserve-env=INFINITY_PUBLIC_DOMAIN docker compose -p portico-infinity-edge up -d
+          cid="$(docker ps -q --filter label=com.docker.compose.project=portico-infinity-edge)"
+          test -n "$cid"
+          test "$(docker inspect "$cid" --format '{{.State.Running}}')" = true
+          sudo python3 infinity-edge-lifecycle.py --dry-run >/tmp/edge-lifecycle-plan.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/edge-lifecycle-plan.json'))
+          assert p['owned_project']=='portico-infinity-edge'
+          assert p['containers']==1 and p['running']==1
+          assert p['mutations_performed'] is False
+          assert 'traefik-public' in p['preserved']
+          print('REAL_EDGE_DRY_RUN_READ_ONLY: PASS')
+          PY
+          if sudo python3 infinity-edge-lifecycle.py --remove-bridge >/dev/null 2>&1; then
+            echo "missing operator confirmation was accepted" >&2; exit 1
+          fi
+          test "$(docker inspect "$cid" --format '{{.State.Running}}')" = true
+          sudo python3 infinity-edge-lifecycle.py --deactivate \
+             --confirm DEACTIVATE-INFINITY-EDGE
+          test "$(docker inspect "$cid" --format '{{.State.Running}}')" = false
+          test "$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
+          sudo python3 infinity-edge-lifecycle.py --remove-bridge \
+             --confirm REMOVE-INFINITY-EDGE-BRIDGE
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity-edge)"
+          test "$(docker network inspect traefik-public --format '{{.Id}}')" = "$network_before"
+          test "$(docker inspect foreign-edge-traefik-parent --format '{{.State.Running}}')" = true
+          test "$(docker inspect foreign-edge-service --format '{{.State.Running}}')" = true
+          test "$(sudo sha256sum "$root/compose.yaml" "$root/infinity-upstreams.yml")" = "$before"
+          test -f "$root/infinity-edge-lifecycle.py"
+          sudo python3 infinity-edge-lifecycle.py --remove-bridge \
+             --confirm REMOVE-INFINITY-EDGE-BRIDGE
+          echo 'REAL_EDGE_BRIDGE_REMOVED_WITHOUT_TRAEFIK_NETWORK_OR_FOREIGN_CONTAINER_DAMAGE: PASS'

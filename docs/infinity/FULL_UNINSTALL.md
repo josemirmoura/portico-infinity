@@ -72,6 +72,14 @@ A confirmação `RESTORE-TESTED` é uma declaração explícita do operador, **n
 
 **Exclusões proibidas/fora do escopo:** arquivos dentro do teto físico, modelos, outros projetos do usuário, volumes de outros projetos, worker fixo em `/usr/local/libexec`, conta do executor, rede WireGuard, regra de firewall UFW, proxy/TLS/DNS e bridge da VPS. Esses últimos são etapas independentes com inventário e decisão de proprietário específicos; não alegar desinstalação integral de dois hosts após `--remove-local`.
 
+## Fase 3: desativação isolada da ponte HTTPS na VPS
+
+A ponte Infinity na VPS não é o Traefik principal. Ela tem projeto Compose próprio (`portico-infinity-edge`) e usa a rede Docker `traefik-public` **compartilhada**. O [procedimento da ponte](../../deploy/infinity-vps-edge/README.md) inclui `infinity-edge-lifecycle.py` para inventário, desativação reversível e remoção **apenas do contêiner `bridge`**.
+
+A rotina exige etiquetas Docker de projeto, serviço e diretório de trabalho correspondentes, montagem de configuração read-only, ausência de portas publicadas ou redes inesperadas, além de confirmação explícita. Nunca altera a rede externa, o proxy Traefik principal, ACME/TLS, DNS, WireGuard, UFW, o controlador ou os dados no SRV-IA. Teste de Docker real em runner descartável verifica dois serviços estrangeiros preservados e a rede compartilhada com a mesma identidade.
+
+**Importante:** o procedimento foi projetado para uma ação operacional independente, **não autorizada nesta rodada**. O restante do descomissionamento distribuído continua dependente de inventário e decisões explícitas para worker/conta do SRV-IA, WireGuard em ambos os peers, regras firewall e DNS/TLS.
+
 ## Provas e falhas intencionais
 
 O workflow `infinity-uninstall-private-backup-disposable` usa Docker/Compose reais, controlador sintético root-owned, volume privado de identidade com conteúdo fictício e contêiner estrangeiro. Ele exige:
