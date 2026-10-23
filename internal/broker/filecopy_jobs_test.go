@@ -75,7 +75,7 @@ func TestReconcileFilecopyAfterTransientUnitDisappears(t *testing.T) {
         {"cancelled-before-reboot",filecopyworker.Progress{JobID:id,Phase:"cancelled"},nil,"cancelled",false},
         {"failed-before-reboot",filecopyworker.Progress{JobID:id,Phase:"failed"},nil,"failed",false},
         {"missing-checkpoint",filecopyworker.Progress{JobID:id,Phase:"running"},errors.New("not found"),"",true},
-        {"wrong-job",filecopyworker.Progress{JobID:filecopyID("other","wrong"),Phase:"running"},nil,"reconcile_required",false},
+        {"invalid-job",filecopyworker.Progress{JobID:"vps-agent-filecopy-short",Phase:"running"},nil,"",true},
         {"no-job",filecopyworker.Progress{Phase:"running"},nil,"",true},
         {"bad-terminal-hash",filecopyworker.Progress{JobID:id,Phase:"done",BytesDone:1,BytesTotal:1,SHA256:"abc"},nil,"",true},
         {"nonhex-terminal-hash",filecopyworker.Progress{JobID:id,Phase:"done",BytesDone:1,BytesTotal:1,SHA256:strings.Repeat("z",64)},nil,"",true},
