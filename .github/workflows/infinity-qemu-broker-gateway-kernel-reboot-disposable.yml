@@ -1,0 +1,42 @@
+name: infinity-qemu-broker-gateway-kernel-reboot-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-qemu-broker-gateway-kernel-reboot.sh'
+      - 'tests/integration/infinity-kernel-stack-probe.py'
+      - '.github/workflows/infinity-qemu-broker-gateway-kernel-reboot-disposable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reboot-real-guest-kernel:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Static preflight of original QEMU guest and MCP probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          bash -n scripts/infinity-qemu-broker-gateway-kernel-reboot.sh
+          python3 -m py_compile tests/integration/infinity-kernel-stack-probe.py
+      - name: Real guest kernel reboot of systemd Broker/Gateway and SQLite
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          bash scripts/infinity-qemu-broker-gateway-kernel-reboot.sh
