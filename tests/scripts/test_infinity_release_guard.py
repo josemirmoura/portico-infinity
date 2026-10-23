@@ -15,10 +15,10 @@ COMMUNITY = "josemirmoura/portico-community"
 
 
 def job_section(source: str, job: str) -> str:
-    marker = f"  {job}:\\n"
+    marker = f"  {job}:\n"
     if marker not in source:
         raise AssertionError(f"missing release job: {job}")
-    return source.split(marker, 1)[1].split("\\n  ", 1)[0]
+    return source.split(marker, 1)[1].split("\n  ", 1)[0]
 
 
 class InheritedReleaseGateTests(unittest.TestCase):
@@ -38,7 +38,7 @@ class InheritedReleaseGateTests(unittest.TestCase):
 
         begin = validate.index(opening)
         end = validate.index("          fi", begin) + len("          fi")
-        block = "\\n".join(line[10:] for line in validate[begin:end].splitlines()) + "\\n"
+        block = "\n".join(line[10:] for line in validate[begin:end].splitlines()) + "\n"
         for repository, expected in (
             (COMMUNITY, 0),
             ("josemirmoura/portico-infinity", 1),
@@ -68,7 +68,7 @@ class InheritedReleaseGateTests(unittest.TestCase):
 
     def test_owner_dispatch_required(self):
         self.assertIn("  workflow_dispatch:", self.source)
-        self.assertNotIn("  release:\\n", self.source)
+        self.assertNotIn("  release:\n", self.source)
         self.assertIn("test \"$GITHUB_EVENT_NAME\" = 'workflow_dispatch'", job_section(self.source, "validate"))
 
 
