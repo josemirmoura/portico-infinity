@@ -34,16 +34,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SCOPE="/var/lib/portico-e2e-$GITHUB_RUN_ID"
+          SCOPE="/data/portico-e2e-$GITHUB_RUN_ID"
           test ! -e "$SCOPE"
           sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin portico-infinity-exec
           sudo install -d -o root -g root -m 0755 /srv/portico-infinity
           sudo cp -a "$GITHUB_WORKSPACE"/. /srv/portico-infinity/
           sudo chown -R root:root /srv/portico-infinity
           sudo chmod -R go-w /srv/portico-infinity
-          test ! -L /var && test ! -L /var/lib
-          test -d /var/lib
-          sudo install -d -o root -g root -m 0755 "$SCOPE"
+          test ! -L /data
+          if [ -e /data ] && [ ! -d /data ]; then
+            echo "alternate scope ancestor /data not a directory" >&2
+            exit 1
+          fi
+          sudo install -d -o root -g root -m 0755 /data "$SCOPE"
           sudo install -d -o portico-infinity-exec -g portico-infinity-exec -m 0755 "$SCOPE/project" "$SCOPE/sibling"
           printf 'ALT_CI_SECRET=synthetic-only\n' | sudo tee "$SCOPE/project/.env" >/dev/null
           printf 'ALT_SIBLING_SECRET=synthetic-only\n' | sudo tee "$SCOPE/sibling/.env" >/dev/null
@@ -53,12 +56,12 @@ jobs:
           cd /srv/portico-infinity
           sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
           ! sudo -u portico-infinity-exec test -w /srv/portico-infinity
-      - name: Configure real Docker Broker with /var/lib physical ceiling
+      - name: Configure real Docker Broker with /data physical ceiling
         shell: bash
         run: |
           set -euo pipefail
           cd /srv/portico-infinity
-          SCOPE="/var/lib/portico-e2e-$GITHUB_RUN_ID"
+          SCOPE="/data/portico-e2e-$GITHUB_RUN_ID"
           sudo env VPS_AGENT_LANG=pt-BR VPS_AGENT_LANG_EXPLICIT=1 \
             bash scripts/init.sh --scope "$SCOPE" --run-as portico-infinity-exec --lang pt-BR
           sudo python3 scripts/configure-infinity-opt.py --env .env --policy config/policy.yaml
@@ -94,11 +97,11 @@ jobs:
           sudo grep -Fq "VPS_AGENT_SCOPE_ROOT=$SCOPE" .env
           sudo grep -Fq -- "- $SCOPE" config/policy.yaml
           sudo grep -Fq 'full_mode_enabled: false' config/policy.yaml
-      - name: Start real Broker and Gateway; test MCP shell in /var/lib
+      - name: Start real Broker and Gateway; test MCP shell in /data
         shell: bash
         run: |
           set -euo pipefail
-          SCOPE="/var/lib/portico-e2e-$GITHUB_RUN_ID"
+          SCOPE="/data/portico-e2e-$GITHUB_RUN_ID"
           cd /srv/portico-infinity
           sudo docker compose -p portico-infinity-alt-ci up -d --build broker gateway
           ready=0
@@ -149,4 +152,4 @@ jobs:
             cd /srv/portico-infinity
             sudo docker compose -p portico-infinity-alt-ci down --remove-orphans --volumes
           fi
-          sudo rm -rf -- "/var/lib/portico-e2e-$GITHUB_RUN_ID" /srv/portico-infinity
+          sudo rm -rf -- "/data/portico-e2e-$GITHUB_RUN_ID" /srv/portico-infinity
