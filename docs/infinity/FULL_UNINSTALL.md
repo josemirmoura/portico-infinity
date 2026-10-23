@@ -47,6 +47,26 @@ O arquivo `/var/backups/portico-infinity/infinity-uninstall-<LABEL>.tar` e seu J
 
 **Importante:** validar SHA-256 confirma integridade do backup criado, mas **não prova que o serviço foi restaurado e voltou a operar**. Antes de exclusão irreversível, efetuar restauração em laboratório isolado, conferindo permissões, banco de identidade, auditoria, conteúdo de volumes e logins. Registrar hashes e evidências numéricas sem divulgar credenciais.
 
+## Descomissionamento do worker privilegiado no host (antes da fase 2)
+
+O [procedimento root-only](../../scripts/infinity-host-worker-lifecycle.py) protege o executável fixo `/usr/local/libexec/portico-infinity/portico-filecopy-worker`. Ele deve ser **retirado antes de excluir o controlador `/srv/portico-infinity`**; a remoção local passa a bloquear expressamente um worker ainda instalado.
+
+Ele exige ausência de jobs `systemd` ativos, falhados, retidos ou com checkpoints inconclusivos, e verifica se nenhum processo Linux ainda executa o mesmo inode. A leitura exige root, proteção dos ancestrais e recusa links simbólicos/hardlinks e permissões inseguras. A remoção exige o **SHA-256 completo do binário instalado e confirmação correspondente aos 20 primeiros caracteres do hash**.
+
+```bash
+cd /srv/portico-infinity
+sudo python3 scripts/infinity-host-worker-lifecycle.py --inspect
+
+# SOMENTE após reconciliar/cancelar todos os trabalhos e aprovar a
+# remoção externa: copie o SHA-256 completo retornado acima.
+sudo python3 scripts/infinity-host-worker-lifecycle.py \
+  --remove-worker \
+  --expected-sha256 '<SHA256_COMPLETO_DO_EXECUTAVEL>' \
+  --confirm 'REMOVE-INFINITY-HOST-WORKER-<20_PRIMEIROS_HEX>'
+```
+
+**Não executa `userdel`, `systemctl stop`, `docker rm` ou `rm -rf`**, não limpa o diretório de auditoria, e não altera o teto de trabalho, a conta do executor, serviços de terceiros, rede ou identidade. A conta de host `portico-infinity-exec` necessita inventário separado e remoção manual, se comprovado que não é compartilhada. Testes com `systemd` transitório real e binário do projeto ocorrem apenas em runner descartável.
+
 ## Fase 2: remoção local após restauração independente
 
 **Somente depois** de o operador ter confirmado o backup SHA-256, ensaiado a restauração em máquina isolada e autorizado especificamente a remoção local, é possível executar o módulo `scripts/infinity-uninstall-local.py`. Ele exige contêineres locais parados, manifesto sem alterações, ausência de workers incertos, ausência de mounts sob o controlador e hashes correspondentes.
@@ -89,4 +109,4 @@ O workflow `infinity-uninstall-private-backup-disposable` usa Docker/Compose rea
 - Preservação do volume original, serviço estranho e workspaces; nenhuma exclusão de dados pelo novo utilitário.
 - Bloqueio contra reutilizar rótulo de backup, corrupção e mudança de inventário durante a captura.
 
-**Etapas ainda pendentes:** inventário e desmontagem independente do worker do host, conta do executor, ponte VPS, WireGuard, UFW, DNS/TLS e outras dependências compartilhadas; ensaio de restauração integral de serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.
+**Etapas ainda pendentes:** avaliação e remoção manual isolada da conta do executor, WireGuard, UFW, DNS/TLS e outras dependências compartilhadas; ensaio de restauração integral do serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. O worker e a ponte VPS possuem procedimentos separados, sujeitos aos seus respectivos CI e autorização externa. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.
