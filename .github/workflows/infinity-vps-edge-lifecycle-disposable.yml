@@ -54,6 +54,12 @@ jobs:
             sudo rm -rf -- "$root"
           }
           trap cleanup EXIT
+          # GitHub-hosted Ubuntu exposes /opt as root-owned mode 0777;
+          # production preflight must REJECT that unsafe ancestor. Repair
+          # permissions only on this disposable runner, never in production.
+          test "$(stat -c %u:%g /opt)" = "0:0"
+          sudo chmod go-w /opt
+          test "$(stat -c %a /opt)" = 755
           sudo install -d -o root -g root -m 0755 "$root"
           for name in compose.yaml infinity-upstreams.yml infinity-edge-lifecycle.py; do
             sudo install -o root -g root -m 0644 "deploy/infinity-vps-edge/$name" "$root/$name"
