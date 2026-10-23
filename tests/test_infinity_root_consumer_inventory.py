@@ -73,6 +73,20 @@ class RootConsumerInventoryTests(unittest.TestCase):
             with self.assertRaises(inv.InventoryIncomplete):
                 inv.show_unit("portico-ci-test.service")
 
+    def test_systemctl_unset_optional_fields_are_empty_not_missing_service(self):
+        lines = [
+            "Id=portico-ci-test.service",
+            "LoadState=loaded", "User=", "DynamicUser=no",
+            "ExecStart={ path=/bin/sh ; argv[]=/bin/sh /opt/root-script.sh }",
+        ]
+        with mock.patch.object(inv, "run_systemctl", return_value="\\n".join(lines)+"\\n"):
+            doc = inv.show_unit("portico-ci-test.service")
+        self.assertEqual(doc["EnvironmentFiles"], "")
+        self.assertEqual(doc["ExecStartPre"], "")
+        self.assertEqual(doc["ExecStartPost"], "")
+        self.assertEqual(inv.inspect_unit("portico-ci-test.service", doc, "/opt")["classification"],
+                         "root_consumer_review")
+
     def test_cannot_claim_clean_report_after_systemd_partial_failure(self):
         with mock.patch.object(inv, "list_units", return_value=[
                 "portico-ci-test.service", "another.service"
