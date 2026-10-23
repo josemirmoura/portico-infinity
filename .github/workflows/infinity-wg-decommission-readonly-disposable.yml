@@ -1,0 +1,41 @@
+name: infinity-wg-decommission-readonly-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-wg-decommission-audit.py'
+      - 'scripts/infinity-wg-configure.py'
+      - 'tests/scripts/test_infinity_wg_decommission_audit.py'
+      - '.github/workflows/infinity-wg-decommission-readonly-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  private-readonly-inventory:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exact Python syntax and hostile WireGuard configurations as nonroot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          python3 -m py_compile scripts/infinity-wg-decommission-audit.py
+          python3 -m unittest -v tests/scripts/test_infinity_wg_decommission_audit.py
+      - name: Root-owned private synthetic WireGuard peer and unchanged outside state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test ! -e /srv/portico-infinity
+          test ! -e /var/lib/portico-wg-private-test-dont-create
+          test ! -e /etc/wireguard/wg-infinity.conf
+          # This test creates ONLY synthetic files in a root-owned temporary
+          # /var/lib child; never edits /etc/wireguard, UFW, DNS or systemd.
+          sudo python3 -m unittest -v tests/scripts/test_infinity_wg_decommission_audit.py
+          test ! -e /etc/wireguard/wg-infinity.conf
+          echo 'INFINITY_WG_PRIVATE_ROOT_ONLY_CONFIG_NO_SECRETS_AND_NO_HOST_MUTATIONS: PASS'
