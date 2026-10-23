@@ -56,10 +56,10 @@ def list_units() -> list[str]:
                            "--plain", "--no-legend", "--no-pager", "--no-ask-password")
     units: list[str] = []
     for row in output.splitlines():
-        row = row.strip()
+        row = row.strip().lstrip("●").strip()
         if not row:
             continue
-        name = row.split(None, 1)[0].lstrip("●").strip()
+        name = row.split(None, 1)[0]
         if not UNIT_RE.fullmatch(name):
             raise InventoryIncomplete("unexpected service unit name; inventory incomplete")
         units.append(name)
@@ -131,8 +131,11 @@ def inventory(scope: str) -> dict:
     units = list_units()
     findings: list[dict] = []
     for name in units:
-        data = show_unit(name)
-        entry = inspect_unit(name, data, scope)
+        try:
+            data = show_unit(name)
+            entry = inspect_unit(name, data, scope)
+        except InventoryIncomplete as exc:
+            raise InventoryIncomplete("cannot fully inspect service " + name + ": " + str(exc)) from exc
         if entry is not None:
             findings.append(entry)
     root_count = sum(x["classification"] == "root_consumer_review" for x in findings)
