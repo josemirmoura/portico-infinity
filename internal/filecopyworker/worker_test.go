@@ -228,3 +228,29 @@ func TestWorkerCancelledWithoutPublishing(t *testing.T) {
         t.Fatal("cancelled job must not retry without operator reconciliation")
     }
 }
+
+
+func TestWorkerWorkspaceInitializationFailureIsTerminal(t *testing.T) {
+    dir, host, src, dst, id := fixture(t)
+    prepare(t, dir, Manifest{JobID:id, Subject:"init-failure",
+        Source:src, Destination:dst, MaxBytes:1<<30})
+
+    // hostRoot is a test seam: nonabsolute roots cause deterministic
+    // NewWithHostRoot failure after the initial "running" checkpoint.
+    if _, err := Run(context.Background(), dir, "relative-host-root", id); err == nil {
+        t.Fatal("invalid workspace unexpectedly initialized")
+    }
+    progress := readProgress(t, dir, id)
+    if progress.Phase != "failed" || progress.BytesDone != 0 || progress.BytesTotal != 0 {
+        t.Fatalf("pre-copy initialization error left an uncertain running checkpoint: %+v", progress)
+    }
+    if _, err := Run(context.Background(), dir, host, id); err == nil {
+        t.Fatal("failed initialization was automatically retried without operator reconciliation")
+    }
+    if got := readProgress(t, dir, id); got.Phase != "failed" {
+        t.Fatalf("rejected replay corrupted durable phase: %s", got.Phase)
+    }
+    if _, err := os.Stat(filepath.Join(host, strings.TrimPrefix(dst, "/"))); !errors.Is(err, os.ErrNotExist) {
+        t.Fatal("invalid workspace initialized a destination")
+    }
+}
