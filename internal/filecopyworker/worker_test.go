@@ -254,3 +254,53 @@ func TestWorkerWorkspaceInitializationFailureIsTerminal(t *testing.T) {
         t.Fatal("invalid workspace initialized a destination")
     }
 }
+
+func TestWorkerRevocationAtPrePublicationFence(t *testing.T) {
+    dir, host, src, dst, id := fixture(t)
+    // Exactly three one-MiB progress callbacks follow the initial check.
+    source := bytes.Repeat([]byte("x"), 3<<20)
+    if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), source, 0600); err != nil { t.Fatal(err) }
+    prepare(t, dir, Manifest{JobID:id, Subject:"late-revoked", Source:src, Destination:dst, MaxBytes:5<<20})
+    marker, err := SubjectRevocationMarker("late-revoked")
+    if err != nil { t.Fatal(err) }
+    checks := 0
+    checker := func(d, s string) (bool, error) {
+        checks++
+        if checks == 5 {
+            if err := os.WriteFile(filepath.Join(d, marker), []byte("revoked\n"), 0600); err != nil { return false, err }
+        }
+        return IsSubjectRevoked(d, s)
+    }
+    if _, err := runWithRevocationCheck(context.Background(), dir, host, id, checker); !errors.Is(err, context.Canceled) {
+        t.Fatalf("late revocation failed to cancel before publication: %v", err)
+    }
+    if checks != 5 { t.Fatalf("unexpected revocation checks: %d, wanted 5", checks) }
+    if got := readProgress(t, dir, id); got.Phase != "cancelled" {
+        t.Fatalf("late revocation status: %s", got.Phase)
+    }
+    if _, err := os.Stat(filepath.Join(host, strings.TrimPrefix(dst, "/"))); !errors.Is(err, os.ErrNotExist) {
+        t.Fatal("late-revoked principal published destination")
+    }
+}
+
+func TestWorkerPrePublicationFenceUnavailableFailsClosed(t *testing.T) {
+    dir, host, src, dst, id := fixture(t)
+    if err := os.WriteFile(filepath.Join(host, strings.TrimPrefix(src, "/")), bytes.Repeat([]byte("x"), 3<<20), 0600); err != nil { t.Fatal(err) }
+    prepare(t, dir, Manifest{JobID:id, Subject:"fence-io-error", Source:src, Destination:dst, MaxBytes:5<<20})
+    checks := 0
+    checker := func(d, s string) (bool, error) {
+        checks++
+        if checks == 5 { return false, errors.New("operator fence unavailable") }
+        return IsSubjectRevoked(d, s)
+    }
+    if _, err := runWithRevocationCheck(context.Background(), dir, host, id, checker); err == nil {
+        t.Fatal("unavailable pre-publication fence unexpectedly accepted")
+    }
+    if checks != 5 { t.Fatalf("late fence was not checked: %d", checks) }
+    if got := readProgress(t, dir, id); got.Phase != "reconcile_required" {
+        t.Fatalf("unavailable fence must fail closed, got: %s", got.Phase)
+    }
+    if _, err := os.Stat(filepath.Join(host, strings.TrimPrefix(dst, "/"))); !errors.Is(err, os.ErrNotExist) {
+        t.Fatal("copy published after pre-publication fence I/O failure")
+    }
+}
