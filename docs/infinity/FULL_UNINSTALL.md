@@ -109,6 +109,26 @@ A confirmação `RESTORE-TESTED` é uma declaração explícita do operador, **n
 
 **Exclusões proibidas/fora do escopo:** arquivos dentro do teto físico, modelos, outros projetos do usuário, volumes de outros projetos, worker fixo em `/usr/local/libexec`, conta do executor, rede WireGuard, regra de firewall UFW, proxy/TLS/DNS e bridge da VPS. Esses últimos são etapas independentes com inventário e decisão de proprietário específicos; não alegar desinstalação integral de dois hosts após `--remove-local`.
 
+## WireGuard e UFW: inventário independente, sem exclusão automática
+
+A interface `wg-infinity`, a identidade privada `/etc/wireguard` e a regra UFW UDP `51822` foram criadas **fora do Docker e do ciclo de vida local**, por procedimentos de administração separados em dois hosts. Mesmo com um túnel configurado originalmente para o Infinity, não é possível concluir automaticamente que nenhum outro serviço passou a usá-lo depois.
+
+O novo `scripts/infinity-wg-decommission-audit.py` implementa **somente leitura**. Confere root, caminhos sem symlinks, arquivos de chave/configuração privados, uma única seção `[Peer]`, `AllowedIPs` estritamente locais, ausência de hooks do `wg-quick` (por exemplo `PostDown`, `SaveConfig`, `Table`, `DNS`) e correspondência entre a chave privada local e sua chave pública por `wg pubkey`. Também inventaria o estado da unidade `wg-quick@wg-infinity.service`, a interface, os peers e o endereço local **sem exibir chaves privadas ou endpoints**.
+
+A verificação exige execução pelo operador em **cada host**, com a função correspondente:
+
+```bash
+# Na VPS, execução apenas após autorização de inspeção e conferência do SHA:
+sudo python3 scripts/infinity-wg-decommission-audit.py --inspect --role vps
+
+# No SRV-IA, leitura separada e autorização específica:
+sudo python3 scripts/infinity-wg-decommission-audit.py --inspect --role srv-ia
+```
+
+A saída `shared_use_ruled_out: false` é **intencional**: mesmo uma configuração exata e um único peer não provam ausência de dependências externas. A rotina não modifica `wg-quick`, serviços, routes, WireGuard, UFW, certificados, DNS, arquivos `.conf` ou chaves.
+
+**Gate ainda pendente para uma retirada real:** após o encerramento da ponte VPS e dos jobs, inventariar manualmente os consumidores do túnel, interfaces/rotas, política de boot nos dois peers e a regra exata UFW (incluindo comentário, duplicidade e finalidade). Só um procedimento com aprovação do proprietário, rollback de conectividade e verificação de isolamento poderá desativar o túnel. **Não apagar regras pelo número exibido no UFW sem novo inventário, nem excluir chaves privadas como efeito colateral de desinstalação Docker.**
+
 ## Fase 3: desativação isolada da ponte HTTPS na VPS
 
 A ponte Infinity na VPS não é o Traefik principal. Ela tem projeto Compose próprio (`portico-infinity-edge`) e usa a rede Docker `traefik-public` **compartilhada**. O [procedimento da ponte](../../deploy/infinity-vps-edge/README.md) inclui `infinity-edge-lifecycle.py` para inventário, desativação reversível e remoção **apenas do contêiner `bridge`**.
@@ -126,4 +146,4 @@ O workflow `infinity-uninstall-private-backup-disposable` usa Docker/Compose rea
 - Preservação do volume original, serviço estranho e workspaces; nenhuma exclusão de dados pelo novo utilitário.
 - Bloqueio contra reutilizar rótulo de backup, corrupção e mudança de inventário durante a captura.
 
-**Etapas ainda pendentes:** desmontagem controlada de WireGuard, UFW, DNS/TLS e outras dependências compartilhadas; ensaio de restauração integral do serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. A conta do executor é **preexistente e preservada**, não um artefato a remover; o worker e a ponte VPS possuem procedimentos separados com provas em runners descartáveis e autorização operacional ainda pendente. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.
+**Etapas ainda pendentes:** após inventário WireGuard root-only, desmontagem controlada e autorizada de WireGuard, UFW, DNS/TLS e quaisquer dependências compartilhadas; ensaio de restauração integral do serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. A conta do executor é **preexistente e preservada**, não um artefato a remover; o worker e a ponte VPS possuem procedimentos separados com provas em runners descartáveis e autorização operacional ainda pendente. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.
