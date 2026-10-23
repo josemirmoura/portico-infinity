@@ -1,6 +1,6 @@
 # Gates de aceite: Pórtico Infinity
 
-## Atualização verificável em 22/10/2026 (pós-PR #40)
+## Atualização verificável em 23/10/2026 (pós-PR #43)
 
 A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivamente em runners descartáveis do GitHub; não autorizam atualização do SRV-IA nem publicação.
 
@@ -17,16 +17,19 @@ A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivament
 | Desativação com worker falhado | [PR #36](https://github.com/josemirmoura/portico-infinity/pull/36), [E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39862020998) | 8/8 workflows no head `8ea9e1cf`; falha de worker `systemd` detectada e bloqueada até reconciliação externa |
 | Fence externo de cópias longas por sujeito | [PR #38](https://github.com/josemirmoura/portico-infinity/pull/38), [E2E de revogação](https://github.com/josemirmoura/portico-infinity/actions/runs/39871198739), [E2E Docker/MCP](https://github.com/josemirmoura/portico-infinity/actions/runs/39871198832) | 14/14 workflows SUCCESS no SHA `2b4883a1`; marcador root-owned, rejeição de novos despachos e cancelamento com checkpoint de worker sintético real `systemd`. Prova de OAuth integrado registrada separadamente na PR #40 | 
 | Revogação OAuth real + worker ativo no mesmo E2E | [PR #40](https://github.com/josemirmoura/portico-infinity/pull/40), [GitHub Actions](https://github.com/josemirmoura/portico-infinity/actions/runs/39874940886) | 8/8 workflows SUCCESS no head `315b7985`; identidade ZITADEL sintética, MCP autenticado inicia cópia 8 GiB, unidade `systemd` ativa, fence externo, estado durável `cancelled`, destino ausente, novas cópias recusadas; conta desativada e **mesmo token → HTTP 401** |
+| Reboot real do kernel guest com worker `systemd` ativo | [PR #42](https://github.com/josemirmoura/portico-infinity/pull/42), [QEMU E2E](https://github.com/josemirmoura/portico-infinity/actions/runs/39879379953) | 13/13 workflows SUCCESS no head `095bdb48`; imagem Ubuntu 24.04 oficial verificada por SHA256, `/proc/sys/kernel/random/boot_id` alterado após reset QMP, manifesto/checkpoint sobreviventes, unidade transitória ausente, destino não publicado e replay negado. **É reboot real de VM, não SRV-IA** |
+| Ciclo de vida pós-reboot com checkpoints incertos | [PR #43](https://github.com/josemirmoura/portico-infinity/pull/43) | 8/8 workflows SUCCESS no head `08451f0c`; o operador não desativa nem remove o runtime com manifesto sem checkpoint ou job `queued/running/reconcile_required`, mesmo sem unidade systemd; arquivos/volumes externos preservados |
+
 
 **Bloqueadores reais da v1.0:**
 
 1. Revogação de **sessões humanas**, sessões browser e **refresh tokens** com cliente interativo; a conta de serviço e o bearer do mesmo fluxo MCP + cópia ativa já passaram no E2E da PR #40, mas não substituem ensaio humano.
-2. Reboot, restauração e reconciliação de trabalhos incertos no laboratório e, sob autorização específica, no SRV-IA.
+2. **Recuperação pós-reboot em instalação integral:** reboot real do kernel **da VM** e checkpoint seguro passaram na PR #42. Ainda falta comprovar recuperação do percurso OAuth/MCP/SQLite+Broker após reboot do host completo, procedimentos para arquivos de destino incertos e, sob autorização específica, homologação no SRV-IA.
 3. Desinstalação integral isolada, incluindo identidade, volumes, plano de controle e dependências externas, com backup verificável, inventário e confirmação independente. A rotina de remoção de runtime é deliberadamente parcial.
 4. Segurança de efeitos indiretos em serviços root consumidores de arquivos em /opt e escala extrema, integridade de origem mutável e recuperação do arquivo após falha; o ensaio OAuth + cópia longa no mesmo cenário **já passou** para a identidade sintética.
 5. Release candidate vinculada ao SHA, UAT pessoal do proprietário e decisão expressa GO/NO-GO. Nenhuma tag/release estável antes do GO.
 
-**Operação real:** o MCP do SRV-IA respondeu em 22/10, mas estas PRs não foram implantadas nele. Não foi autorizada execução de deploy, reboot, revogação ou desinstalação.
+**Operação real:** o MCP do SRV-IA respondeu em 22/10 e permaneceu sem implantação das PRs #42/#43. Não houve autorização de deploy, reboot, revogação ou desinstalação operacional. **A decisão GO/NO-GO segue reservada ao proprietário após UAT.**
 
 ---
 
