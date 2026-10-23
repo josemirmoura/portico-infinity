@@ -89,7 +89,10 @@ def ensure_quiescent(life, command=None) -> None:
                     "--no-legend","--no-pager","--full",UNIT])
     if "vps-agent-filecopy-" in result:
         raise WorkerBlocked("retained transient systemd worker unit requires explicit reconciliation")
-    files=command(["systemctl","list-unit-files","--no-legend","--no-pager",UNIT])
+    # A glob with no matches makes some systemctl versions return exit 1.
+    # Enumerate all unit files, filter locally and fail closed on actual
+    # invocation errors instead of confusing "no match" with a crash.
+    files=command(["systemctl","list-unit-files","--no-legend","--no-pager"])
     if "vps-agent-filecopy-" in files:
         raise WorkerBlocked("persistent systemd worker service file requires explicit reconciliation")
 
@@ -162,7 +165,7 @@ def main():
         print("INFINITY HOST WORKER REMOVED: exact root-owned binary only")
         print("PRESERVED: controller and audit, state, account, /opt, foreign services and networks")
         return 0
-    except (WorkerBlocked,OSError,ValueError) as exc:
+    except (WorkerBlocked,OSError,ValueError,RuntimeError) as exc:
         print("INFINITY HOST WORKER DECOMMISSION BLOCKED: "+str(exc),file=sys.stderr)
         return 2
 
