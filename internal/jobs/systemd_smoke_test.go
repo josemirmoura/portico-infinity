@@ -69,3 +69,55 @@ func TestSystemdRunnerSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestShellSystemdTerminalStatusSmoke(t *testing.T) {
+    if os.Getenv("VPS_AGENT_SYSTEMD_JOB_SMOKE") != "1" {
+        t.Skip("requires privileged systemd smoke environment")
+    }
+    if _, err := exec.LookPath("systemd-run"); err != nil {
+        t.Skip("systemd-run unavailable")
+    }
+    scenarios := []struct {
+        name string
+        cmd string
+        cwd string
+        state string
+        exit int
+    }{
+        {name: "done", cmd: "printf shell-terminal-ok\\n", cwd: "/tmp", state: "done", exit: 0},
+        {name: "exit17", cmd: "exit 17", cwd: "/tmp", state: "failed", exit: 17},
+        {name: "chdir200", cmd: "true", cwd: t.TempDir(), state: "failed", exit: 200},
+    }
+    for i, tc := range scenarios {
+        t.Run(tc.name, func(t *testing.T) {
+            unit := fmt.Sprintf("vps-agent-ci-terminal-%d-%d", os.Getpid(), i)
+            runner := SystemdRunner{}
+            ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+            defer cancel()
+            job, err := runner.Start(ctx, sandbox.Spec{
+                Unit: unit, User: "vps-agent-exec", Command: tc.cmd,
+                CWD: tc.cwd, Runtime: 10*time.Second,
+                MemoryMaxBytes: 64 << 20, TasksMax: 16, NetworkMode: "blocked",
+            })
+            if err != nil { t.Fatal(err) }
+            t.Cleanup(func() {
+                _ = exec.Command("systemctl", "stop", unit).Run()
+                _ = exec.Command("systemctl", "reset-failed", unit).Run()
+            })
+            var status TerminalStatus
+            deadline := time.Now().Add(12*time.Second)
+            for time.Now().Before(deadline) {
+                status, err = runner.DetailedStatus(ctx, job)
+                if err == nil && (status.State == "done" || status.State == "failed") {
+                    break
+                }
+                time.Sleep(100*time.Millisecond)
+            }
+            if err != nil || status.State != tc.state || status.ExitCode == nil || *status.ExitCode != tc.exit {
+                logs, _ := runner.Tail(ctx, job, 20)
+                t.Fatalf("shell state=%+v err=%v want state=%s exit=%d; logs=%s",
+                    status, err, tc.state, tc.exit, logs)
+            }
+        })
+    }
+}
