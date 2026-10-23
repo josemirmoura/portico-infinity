@@ -90,7 +90,7 @@ BOOT_BEFORE="$("${S[@]}" "cat /proc/sys/kernel/random/boot_id")"
 # native Gateway/Broker systemd services. Real bearer is created BEFORE reboot.
 ssh_guest() { "${S[@]}" "$@"; }
 scp_guest() { "${P[@]}" "$@"; }
-ssh_guest "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2 ca-certificates curl python3 >/dev/null && sudo systemctl enable --now docker"
+ssh_guest "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2 ca-certificates curl python3 nginx openssl >/dev/null && sudo systemctl enable --now docker"
 scp_guest compose.yaml compose.integrated-auth.yaml tests/integration/infinity-qemu-oauth-guest-setup.sh "infinity-ci@127.0.0.1:/tmp/"
 ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --setup"
 OAUTH_SUBJECT="$(ssh_guest 'sudo cat /srv/infinity-oauth-ci/subject')"
@@ -164,8 +164,8 @@ EOF
 cat >"$LAB/portico-kernel-gateway.service" <<'EOF'
 [Unit]
 Description=Disposable nonroot Pórtico Gateway for real guest kernel reboot
-After=docker.service portico-kernel-broker.service
-Wants=docker.service
+After=docker.service nginx.service portico-kernel-broker.service
+Wants=docker.service nginx.service
 Requires=portico-kernel-broker.service
 [Service]
 Type=exec
@@ -193,8 +193,23 @@ for i in $(seq 1 100); do
   sleep 1
 done
 if test "$ready" != 1; then
-  ssh_guest "sudo systemctl --no-pager status portico-kernel-broker.service portico-kernel-gateway.service" || true
   echo "guest services did not become active before reboot" >&2
+  ssh_guest "sudo systemctl show portico-kernel-broker.service portico-kernel-gateway.service -p Result -p ActiveState -p NRestarts -p ExecMainStatus --no-pager" || true
+  exit 1
+fi
+# The systemd 'active' state alone is insufficient: a Restart=always service
+# may briefly look active while its HTTPS verifier rejects configuration.
+guest_ready=0
+for i in $(seq 1 60); do
+  if ssh_guest 'sudo systemctl is-active --quiet nginx && sudo test -r /etc/portico-qemu-oauth-tls/ca.pem && curl -fsS --connect-timeout 2 --max-time 12 --cacert /etc/portico-qemu-oauth-tls/ca.pem https://127.0.0.1:18443/.well-known/openid-configuration >/dev/null && curl -fsS --connect-timeout 2 --max-time 12 http://127.0.0.1:8080/healthz >/dev/null' >/dev/null 2>&1; then
+    guest_ready=1
+    break
+  fi
+  sleep 2
+done
+if test "$guest_ready" != 1; then
+  echo "Guest HTTPS OAuth backchannel or Gateway readiness failed" >&2
+  ssh_guest "sudo systemctl show portico-kernel-gateway.service -p Result -p ActiveState -p NRestarts -p ExecMainStatus --no-pager; sudo ss -lnt '( sport = :8080 or sport = :18443 or sport = :18082 )'" || true
   exit 1
 fi
 python3 tests/integration/infinity-kernel-stack-probe.py --phase before \
