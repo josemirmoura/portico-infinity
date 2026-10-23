@@ -93,8 +93,16 @@ users:
                  mock.patch.object(MOD,"account_record",return_value={"uid":1001}),\
                  mock.patch.object(MOD,"process_references",return_value={"processes_seen":0}):
                 with mock.patch.object(MOD,"extract_run_as",wraps=MOD.extract_run_as) as parser:
-                    self.assertEqual(MOD.audit(policy=path)["uid"],1001)
-                    parser.assert_called_once()
+                    if os.geteuid()==0:
+                        self.assertEqual(MOD.audit(policy=path)["uid"],1001)
+                        parser.assert_called_once()
+                    else:
+                        # Root-only real policy files must NOT become readable
+                        # merely because a CI test runs under an unprivileged
+                        # hosted runner. The separate sudo CI step proves the
+                        # positive path with genuine root-owned metadata.
+                        with self.assertRaisesRegex(MOD.AccountAuditBlocked,"unsafe policy"):
+                            MOD.audit(policy=path)
                 path.chmod(0o666)
                 with self.assertRaises(MOD.AccountAuditBlocked):
                     MOD.audit(policy=path)
