@@ -76,7 +76,7 @@ class RootConsumerInventoryTests(unittest.TestCase):
     def test_systemctl_unset_optional_fields_are_empty_not_missing_service(self):
         lines = [
             "Id=portico-ci-test.service",
-            "LoadState=loaded", "User=", "DynamicUser=no",
+            "LoadState=loaded", "ActiveState=active", "User=", "DynamicUser=no",
             "ExecStart={ path=/bin/sh ; argv[]=/bin/sh /opt/root-script.sh }",
         ]
         with mock.patch.object(inv, "run_systemctl", return_value="\n".join(lines)+"\n"):
@@ -117,6 +117,27 @@ class RootConsumerInventoryTests(unittest.TestCase):
                                return_value="● failed.service loaded failed failed\n"
                                             "normal.service loaded active running\n"):
             self.assertEqual(inv.list_units(), ["failed.service", "normal.service"])
+
+    def test_inactive_not_found_unit_is_reported_as_unloaded(self):
+        raw = ("Id=NetworkManager.service\\n"
+               "LoadState=not-found\\n"
+               "ActiveState=inactive\\n")
+        with mock.patch.object(inv, "run_systemctl", return_value=raw):
+            unit = inv.show_unit("NetworkManager.service")
+        self.assertIsNone(inv.inspect_unit("NetworkManager.service", unit, "/opt"))
+        with mock.patch.object(inv, "list_units", return_value=["NetworkManager.service"]), \
+             mock.patch.object(inv, "show_unit", return_value=unit):
+            report = inv.inventory("/opt")
+        self.assertEqual(report["inactive_unloaded_services"], 1)
+        self.assertEqual(report["systemd_services_inspected"], 0)
+
+    def test_active_missing_unit_must_fail_closed(self):
+        raw = ("Id=unexpected.service\\n"
+               "LoadState=not-found\\n"
+               "ActiveState=active\\n")
+        with mock.patch.object(inv, "run_systemctl", return_value=raw):
+            with self.assertRaises(inv.InventoryIncomplete):
+                inv.show_unit("unexpected.service")
 
     def test_physical_scope_validation(self):
         for bad in ("/", "/etc", "opt", "/opt/../etc", "/opt/", "/srv"):
