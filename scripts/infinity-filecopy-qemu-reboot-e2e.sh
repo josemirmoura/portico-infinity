@@ -26,10 +26,16 @@ sudo apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils ovmf so
 command -v qemu-system-x86_64
 command -v cloud-localds
 OVMF=""
+OVMF_VARS=""
 for candidate in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
-  if test -r "$candidate"; then OVMF="$candidate"; break; fi
+  if test -r "$candidate"; then
+    vars="${candidate/CODE/VARS}"
+    if test -r "$vars"; then OVMF="$candidate"; OVMF_VARS="$vars"; break; fi
+  fi
 done
-test -n "$OVMF" || { echo "UEFI firmware not available" >&2; exit 2; }
+test -n "$OVMF" && test -n "$OVMF_VARS" || { echo "UEFI code/variable firmware not available" >&2; exit 2; }
+cp -- "$OVMF_VARS" "$LAB/ovmf-vars.fd"
+chmod 0600 "$LAB/ovmf-vars.fd"
 BASE=https://cloud-images.ubuntu.com/minimal/releases/noble/release
 curl -fsSL --retry 4 --connect-timeout 20 "$BASE/SHA256SUMS" -o "$LAB/SHA256SUMS"
 curl -fsSL --retry 4 --connect-timeout 20 "$BASE/ubuntu-24.04-minimal-cloudimg-amd64.img" -o "$LAB/ubuntu.img"
@@ -57,7 +63,8 @@ cloud-localds "$LAB/seed.iso" "$LAB/user-data" "$LAB/meta-data"
 test ! -e "$LAB/qmp.sock"
 ! ss -ltn | grep -q ":12022 " || { echo "VM SSH port already bound" >&2; exit 2; }
 qemu-system-x86_64 -machine "q35,accel=$ACCEL" -m 2048 -smp 2 -nographic -monitor none \
-  -bios "$OVMF" \
+  -drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF" \
+  -drive "if=pflash,format=raw,unit=1,file=$LAB/ovmf-vars.fd" \
   -drive "file=$LAB/ubuntu-24.04-minimal-cloudimg-amd64.img,if=virtio,format=qcow2" \
   -drive "file=$LAB/seed.iso,if=virtio,media=cdrom,format=raw" \
   -netdev "user,id=vmnet,hostfwd=tcp:127.0.0.1:12022-:22" \
