@@ -225,7 +225,19 @@ for i in $(seq 1 120); do
   sleep 1
 done
 test "$ready" = 1 || { echo "Broker/Gateway failed to recover after kernel reboot" >&2; exit 1; }
-ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --verify"
+oauth_ready=0
+for i in $(seq 1 150); do
+  if ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --verify" >/dev/null 2>&1; then
+    oauth_ready=1
+    break
+  fi
+  sleep 2
+done
+test "$oauth_ready" = 1 || {
+  echo "guest ZITADEL/Postgres did not recover after kernel reboot" >&2
+  exit 1
+}
+echo "INFINITY_QEMU_OAUTH_ZITADEL_POSTGRES_RECOVERED_AFTER_REAL_REBOOT: PASS"
 python3 tests/integration/infinity-kernel-stack-probe.py --phase after \
   --endpoint http://127.0.0.1:18080/mcp --token-file "$LAB/token" --scope "$SCOPE"
 ssh_guest "sudo /bin/sh -c '. /etc/portico-kernel-broker.env; export VPS_AGENT_ADMIN_TOKEN; exec /usr/local/libexec/portico-infinity/vps-agent audit-status --socket /run/portico-infinity/broker.sock'" > "$LAB/audit-after.json"
