@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'scripts/infinity-uninstall-backup.py'
+      - 'scripts/infinity-uninstall-local.py'
+      - 'tests/scripts/test_infinity_uninstall_local.py'
       - 'scripts/infinity-lifecycle.py'
       - 'tests/scripts/test_infinity_uninstall_backup.py'
       - '.github/workflows/infinity-uninstall-private-backup-disposable.yml'
@@ -25,6 +27,8 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           python3 -m py_compile scripts/infinity-uninstall-backup.py
           python3 -m unittest -v tests/scripts/test_infinity_uninstall_backup.py
+          python3 -m py_compile scripts/infinity-uninstall-local.py
+          python3 -m unittest -v tests/scripts/test_infinity_uninstall_local.py
       - name: Independent disposable Docker and private backup/restore fixture
         shell: bash
         run: |
@@ -54,6 +58,7 @@ jobs:
           sudo install -d -o root -g root -m 0700 "$lab"
           sudo install -o root -g root -m 0644 scripts/infinity-lifecycle.py "$controller/scripts/infinity-lifecycle.py"
           sudo install -o root -g root -m 0644 scripts/infinity-uninstall-backup.py "$controller/scripts/infinity-uninstall-backup.py"
+          sudo install -o root -g root -m 0644 scripts/infinity-uninstall-local.py "$controller/scripts/infinity-uninstall-local.py"
           sudo tee "$controller/compose.yaml" >/dev/null <<'YAML'
           name: portico-infinity
           services:
@@ -107,3 +112,39 @@ jobs:
           echo 'ISOLATED FULL-UNINSTALL PRIVATE BACKUP SHA + ACTUAL RESTORE OF CONFIG AND IDENTITY: PASS'
           # Reproves that the backup script NEVER removes the original volume.
           test -n "$(docker volume ls -q --filter label=com.docker.compose.project=portico-infinity)"
+          # Destruction requires three independent, exact conditions:
+          # stopped verified owned resources, existing checksum-verified backup,
+          # and an operator attestation of the successfully tested restore.
+          sudo python3 scripts/infinity-uninstall-local.py \
+            --backup-label "$job" --dry-run >/tmp/infinity-local-removal-plan.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/infinity-local-removal-plan.json'))
+          assert d['automatic_deletion'] is False
+          assert d['workspaces_preserved'].startswith('/opt')
+          assert len(d['external_assets_preserved']) >= 4
+          print('DIGEST-BOUND LOCAL REMOVAL DRY RUN: PASS')
+          PY
+          if sudo python3 scripts/infinity-uninstall-local.py --backup-label "$job" \
+             --remove-local --confirm BAD --restore-attested BAD >/dev/null 2>&1; then
+            echo "unauthorized local uninstall was accepted" >&2; exit 1
+          fi
+          test -d "$controller"
+          HASH="$(sudo python3 - "$archive.json" <<'PY'
+          import json,sys
+          print(json.load(open(sys.argv[1]))['sha256'][:20])
+          PY
+          )"
+          [[ "$HASH" =~ ^[0-9a-f]{20}$ ]]
+          sudo python3 scripts/infinity-uninstall-local.py \
+             --backup-label "$job" --remove-local \
+             --confirm "REMOVE-LOCAL-INFINITY-$HASH" \
+             --restore-attested "RESTORE-TESTED-$HASH"
+          cd "$GITHUB_WORKSPACE"
+          test ! -e "$controller"
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=portico-infinity)"
+          test "$(docker inspect unrelated-full-backup-fixture -f '{{.State.Running}}')" = true
+          sudo test -f "$archive"
+          sudo grep -q 'local-resources-removed' "$lab/infinity-uninstall-$job.local-intent.json"
+          echo 'ISOLATED FULL LOCAL REMOVAL AFTER RESTORED VERIFIED BACKUP: PASS'
