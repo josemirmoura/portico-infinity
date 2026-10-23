@@ -68,8 +68,12 @@ jobs:
             sleep 1
           done
           test "$(systemctl show "$UNIT.service" -p SubState --value)" = exited
-          python3 scripts/infinity-root-consumer-inventory.py --scope /opt \
-            > "$RUNNER_TEMP/root-consumer-inventory.json"
+          if ! python3 scripts/infinity-root-consumer-inventory.py --scope /opt \
+            > "$RUNNER_TEMP/root-consumer-inventory.json"; then
+            echo "read-only inventory incomplete; sanitized error:" >&2
+            cat "$RUNNER_TEMP/root-consumer-inventory.json" >&2
+            exit 1
+          fi
           if python3 scripts/infinity-root-consumer-inventory.py --scope /opt --strict \
             > "$RUNNER_TEMP/root-consumer-inventory-strict.json"; then
             echo "strict audit failed to block known synthetic root consumer" >&2
