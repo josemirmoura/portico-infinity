@@ -90,7 +90,16 @@ server {
 }
 EOF
 nginx -t >/dev/null 2>&1
-systemctl enable --now nginx >/dev/null
+# apt may have already started nginx BEFORE installing the CI TLS vhost.
+# "enable --now" is a no-op for an already-active service, so it would not
+# load port 18443. Restart explicitly and require the listener at once.
+systemctl enable nginx >/dev/null
+systemctl restart nginx
+test "$(systemctl is-active nginx)" = active
+test "$(ss -lnt '( sport = :18443 )' | grep -c 18443)" -ge 1 || {
+  echo "disposable nginx TLS listener not bound after restart" >&2
+  exit 1
+}
 docker network create --internal ci-oauth-private >/dev/null
 dc up -d zitadel-postgres zitadel-api >/dev/null
 ready=0
