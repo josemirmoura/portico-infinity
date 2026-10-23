@@ -86,15 +86,19 @@ EOF
 "${S[@]}" "sudo systemd-run --unit=$JOB --no-block --quiet --property=Type=oneshot --property=RemainAfterExit=yes --property=NoNewPrivileges=yes --property=UMask=0077 --property=CPUQuota=3% --property=ProtectSystem=strict --property=ReadWritePaths=\"$SCOPE $STATE\" --property=PrivateDevices=yes --property=PrivateNetwork=yes -- /usr/local/libexec/portico-infinity/portico-filecopy-worker $JOB"
 RUNNING=0
 for i in $(seq 1 180); do
-  PHASE="$("${S[@]}" "sudo python3 -c 'import json; p=\"$STATE/$JOB.progress.json\"; exec(\"try:\\n d=json.load(open(p)); print(d.get(\\\"phase\\\",\\\"\\\"))\\nexcept (OSError,ValueError): print(\\\"pending\\\")\")'" 2>/dev/null || true)"
-  if test "$PHASE" = running; then RUNNING=1; break; fi
-  if test "$PHASE" = done || test "$PHASE" = failed || test "$PHASE" = cancelled; then echo "copy became terminal before forced reset: $PHASE" >&2; exit 1; fi
+  if "${S[@]}" "sudo grep -q '\"phase\":\"running\"' $STATE/$JOB.progress.json" >/dev/null 2>&1; then
+    RUNNING=1
+    break
+  fi
+  if "${S[@]}" "sudo grep -Eq '\"phase\":\"(done|failed|cancelled|reconcile_required)\"' $STATE/$JOB.progress.json" >/dev/null 2>&1; then
+    echo "copy became terminal before forced reset" >&2; exit 1
+  fi
   sleep 0.2
 done
 test "$RUNNING" = 1 || { echo "no running checkpoint in guest" >&2; exit 1; }
 "${S[@]}" "sudo systemctl kill --kill-whom=main --signal=STOP $JOB.service; sudo sync; sudo test ! -e $SCOPE/output.gguf; sudo grep -q '\"phase\":\"running\"' $STATE/$JOB.progress.json"
 echo "INFINITY_QEMU_HOST_WORKER_RUNNING_BEFORE_RESET: PASS"
-printf '{"execute":"qmp_capabilities"}\n{"execute":"system_reset"}\n' | socat - "UNIX-CONNECT:$LAB/qmp.sock" >/dev/null
+printf '{"execute":"qmp_capabilities"}\n{"execute":"system_reset"}\n' | socat -T 3 - "UNIX-CONNECT:$LAB/qmp.sock" >/dev/null
 BOOT_AFTER=""
 for i in $(seq 1 280); do
   BOOT_AFTER="$("${S[@]}" "cat /proc/sys/kernel/random/boot_id" 2>/dev/null || true)"
