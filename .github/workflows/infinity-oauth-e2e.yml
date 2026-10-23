@@ -11,12 +11,14 @@ on:
       - '.github/workflows/infinity-oauth-e2e.yml'
       - 'tests/integration/infinity-oauth-filecopy-probe.py'
       - 'tests/integration/infinity-oauth-filecopy-revocation.sh'
+      - 'tests/integration/infinity-oauth-restart-probe.py'
       - 'scripts/infinity-revoke-filecopy-subject.py'
   pull_request:
     paths:
       - '.github/workflows/infinity-oauth-e2e.yml'
       - 'tests/integration/infinity-oauth-filecopy-probe.py'
       - 'tests/integration/infinity-oauth-filecopy-revocation.sh'
+      - 'tests/integration/infinity-oauth-restart-probe.py'
       - 'scripts/infinity-revoke-filecopy-subject.py'
   workflow_dispatch:
 
@@ -782,6 +784,44 @@ jobs:
           print("GATE_C_UNIFIED_REAL_BROKER_AUDIT_OK")
           PY
 
+          # Stage a real process restart of BOTH service binaries while
+          # preserving the exact Broker SQLite state, ZITADEL/Postgres
+          # identity volumes, the preissued bearer and the scoped fixture.
+          # This is explicitly not a guest kernel/host reboot (QEMU gate is
+          # separately tracked): no simulated reboot claim.
+          cp tests/integration/infinity-oauth-restart-probe.py "$lab/oauth-restart-probe.py"
+          sudo test -f "$lab/broker-state/state.db"
+          docker inspect portico-ci-e2e-broker --format '{{.State.Running}}' | grep -qx true
+          docker inspect portico-ci-e2e-gateway --format '{{.State.Running}}' | grep -qx true
+          before_zitadel="$(docker inspect portico-infinity-oauth-zitadel-api-1 --format '{{.Id}}')"
+          before_pg="$(docker inspect portico-infinity-oauth-zitadel-postgres-1 --format '{{.Id}}')"
+          test -n "$before_zitadel" && test -n "$before_pg"
+          docker restart --time=12 portico-ci-e2e-broker >/dev/null
+          docker restart --time=12 portico-ci-e2e-gateway >/dev/null
+          docker run --rm --network ci-edge \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --mount "type=bind,src=$lab,dst=/pki,readonly" \
+            python:3.12-slim-bookworm \
+            python3 /pki/oauth-restart-probe.py
+          # Same identity containers must still exist, same DB files must
+          # remain and the audited MCP operations must append after restart.
+          test "$(docker inspect portico-infinity-oauth-zitadel-api-1 --format '{{.Id}}')" = "$before_zitadel"
+          test "$(docker inspect portico-infinity-oauth-zitadel-postgres-1 --format '{{.Id}}')" = "$before_pg"
+          sudo test -s "$lab/broker-state/state.db"
+          docker exec portico-ci-e2e-broker \
+            /usr/local/bin/vps-agent audit-status \
+            --socket /run/vps-agent/broker.sock > "$lab/audit-after-restart.json"
+          python3 - "$lab/audit.json" "$lab/audit-after-restart.json" <<'PY'
+          import json,sys
+          before=json.load(open(sys.argv[1],encoding="utf-8"))
+          after=json.load(open(sys.argv[2],encoding="utf-8"))
+          assert before["ok"] and after["ok"]
+          assert before["result"]["valid"] and after["result"]["valid"]
+          assert after["result"]["events"]>before["result"]["events"], "audit events were not durable or appended"
+          print("INFINITY_BROKER_SQLITE_AUDIT_PERSISTS_ACROSS_REAL_PROCESS_RESTART: PASS")
+          PY
+
           # Same real ZITADEL account + token; privileged Broker and host
           # systemd only in this GitHub-hosted disposable pull-request runner.
           bash tests/integration/infinity-oauth-filecopy-revocation.sh "$lab" "$broker_subject"
@@ -799,6 +839,8 @@ jobs:
                         "outside_scope_write_denied","invalid_token_denied",
                         "durable_broker_audit_valid",
                         "legacy_https_config_migration_and_restore",
+                        "real_broker_gateway_restart_same_oauth_bearer",
+                        "broker_sqlite_audit_durable_across_process_restart",
                         "real_oauth_mcp_systemd_filecopy_start",
                         "external_subject_fence_mid_copy",
                         "durable_systemd_cancel_no_destination",
@@ -808,6 +850,8 @@ jobs:
             "scope":"/opt",
             "controller_outside_scope":"/srv/portico-infinity",
             "oauth_integrated_real":True,
+            "gateway_broker_process_restart_verified":True,
+            "host_kernel_reboot_of_complete_oauth_chain":False,
             "operator_login_through_chatgpt":False,
             "real_signed_rc_upgrade_rollback":False,
             "infinity_public_e2e_complete":False
