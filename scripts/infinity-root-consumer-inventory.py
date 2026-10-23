@@ -84,7 +84,9 @@ def show_unit(name: str) -> dict[str, str]:
             raise InventoryIncomplete("unrecognized or duplicate systemd property")
         data[key] = value
     if data.get("Id") != name or data.get("LoadState") not in ("loaded", "masked"):
-        raise InventoryIncomplete("unit identity or load state could not be verified")
+        raise InventoryIncomplete("unit identity or load state could not be verified: " +
+                                  "id_match=" + str(data.get("Id") == name) +
+                                  ", load_state=" + data.get("LoadState", "<missing>")[:32])
     # systemctl show omits optional properties that have no value at all,
     # e.g. an unset ExecStartPre or EnvironmentFiles. Omission of these
     # optional values is NOT the same as an uninspectable service. Fail
