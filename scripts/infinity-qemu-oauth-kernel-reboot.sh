@@ -92,7 +92,12 @@ ssh_guest() { "${S[@]}" "$@"; }
 scp_guest() { "${P[@]}" "$@"; }
 ssh_guest "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2 ca-certificates curl python3 nginx openssl >/dev/null && sudo systemctl enable --now docker"
 scp_guest compose.yaml compose.integrated-auth.yaml tests/integration/infinity-qemu-oauth-guest-setup.sh "infinity-ci@127.0.0.1:/tmp/"
-ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --setup"
+# Persist the test verifier across the REAL guest kernel reboot.
+# Ubuntu cloud images can clear /tmp at boot. A /tmp-only probe would
+# falsely report identity failure and conceal the actual post-reboot state.
+ssh_guest "sudo install -d -o root -g root -m 0755 /usr/local/libexec/portico-infinity && sudo install -o root -g root -m 0755 /tmp/infinity-qemu-oauth-guest-setup.sh /usr/local/libexec/portico-infinity/infinity-qemu-oauth-guest-setup.sh && sudo bash /usr/local/libexec/portico-infinity/infinity-qemu-oauth-guest-setup.sh --setup"
+GUEST_PROBE_SHA="$(ssh_guest 'sudo sha256sum /usr/local/libexec/portico-infinity/infinity-qemu-oauth-guest-setup.sh' | cut -d ' ' -f 1)"
+[[ "$GUEST_PROBE_SHA" =~ ^[a-f0-9]{64}$ ]]
 OAUTH_SUBJECT="$(ssh_guest 'sudo cat /srv/infinity-oauth-ci/subject')"
 test -n "$OAUTH_SUBJECT"
 scp_guest "infinity-ci@127.0.0.1:/home/infinity-ci/portico-oauth-token" "$LAB/token"
@@ -234,6 +239,12 @@ test "$BOOT_AFTER" != "$BOOT_BEFORE" && [[ "$BOOT_AFTER" =~ ^[a-f0-9-]{36}$ ]] |
   echo "real guest kernel boot_id did not change" >&2; exit 2;
 }
 echo "INFINITY_QEMU_BROKER_GATEWAY_REAL_KERNEL_BOOT_ID_CHANGED: PASS"
+GUEST_PROBE_SHA_AFTER="$(ssh_guest 'sudo sha256sum /usr/local/libexec/portico-infinity/infinity-qemu-oauth-guest-setup.sh' | cut -d ' ' -f 1)"
+test "$GUEST_PROBE_SHA_AFTER" = "$GUEST_PROBE_SHA" || {
+  echo "persistent guest OAuth verifier lost or modified during kernel reboot" >&2
+  exit 1
+}
+echo "INFINITY_QEMU_GUEST_OAUTH_VERIFIER_PERSISTED_SHA256_AFTER_REBOOT: PASS"
 ready=0
 for i in $(seq 1 120); do
   if ssh_guest "systemctl is-active --quiet portico-kernel-broker && systemctl is-active --quiet portico-kernel-gateway && sudo test -S /run/portico-infinity/broker.sock" >/dev/null 2>&1; then ready=1; break; fi
@@ -242,7 +253,7 @@ done
 test "$ready" = 1 || { echo "Broker/Gateway failed to recover after kernel reboot" >&2; exit 1; }
 oauth_ready=0
 for i in $(seq 1 150); do
-  if ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --verify" >/dev/null 2>&1; then
+  if ssh_guest "sudo bash /usr/local/libexec/portico-infinity/infinity-qemu-oauth-guest-setup.sh --verify" >/dev/null 2>&1; then
     oauth_ready=1
     break
   fi
@@ -250,7 +261,7 @@ for i in $(seq 1 150); do
 done
 test "$oauth_ready" = 1 || {
   echo "guest ZITADEL/Postgres did not recover after kernel reboot" >&2
-  ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --diagnose" || true
+  ssh_guest "sudo bash /usr/local/libexec/portico-infinity/infinity-qemu-oauth-guest-setup.sh --diagnose" || true
   exit 1
 }
 echo "INFINITY_QEMU_OAUTH_ZITADEL_POSTGRES_RECOVERED_AFTER_REAL_REBOOT: PASS"
