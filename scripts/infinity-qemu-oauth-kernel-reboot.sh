@@ -250,6 +250,7 @@ for i in $(seq 1 150); do
 done
 test "$oauth_ready" = 1 || {
   echo "guest ZITADEL/Postgres did not recover after kernel reboot" >&2
+  ssh_guest "sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --diagnose" || true
   exit 1
 }
 echo "INFINITY_QEMU_OAUTH_ZITADEL_POSTGRES_RECOVERED_AFTER_REAL_REBOOT: PASS"
