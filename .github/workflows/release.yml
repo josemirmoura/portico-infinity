@@ -40,6 +40,13 @@ jobs:
           PUBLISH_CONFIRMATION: ${{ inputs.publish_confirmation }}
         run: |
           set -euo pipefail
+          # This release workflow is inherited from Community. A GitHub actor
+          # confirmation is NOT proof of Infinity UAT and explicit GO.
+          # Fail closed before checkout, builds, tags, GHCR pushes or release.
+          if [ "${GITHUB_REPOSITORY:-}" != 'josemirmoura/portico-community' ]; then
+            echo '::error::Inherited Community release disabled outside portico-community. Infinity requires owner UAT and explicit GO in a dedicated workflow.' >&2
+            exit 1
+          fi
           # Each run, including reruns, must be operated by the repository owner.
           test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
           test "$GITHUB_ACTOR" = 'josemirmoura'
@@ -195,6 +202,7 @@ jobs:
           fi
 
   images:
+    if: github.repository == 'josemirmoura/portico-community'
     needs: prepare-tag
     runs-on: ubuntu-24.04
     permissions:
@@ -255,6 +263,7 @@ jobs:
             --certificate-oidc-issuer "$issuer"
 
   github-release:
+    if: github.repository == 'josemirmoura/portico-community'
     needs: images
     runs-on: ubuntu-24.04
     permissions:

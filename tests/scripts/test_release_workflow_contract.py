@@ -123,6 +123,7 @@ class ReleaseWorkflowSecurityContract(unittest.TestCase):
         )
         commit = "a" * 40
         environment = dict(os.environ,
+            GITHUB_REPOSITORY="josemirmoura/portico-community",
             GITHUB_EVENT_NAME="workflow_dispatch",
             GITHUB_ACTOR="josemirmoura",
             GITHUB_TRIGGERING_ACTOR="josemirmoura",
@@ -142,6 +143,9 @@ class ReleaseWorkflowSecurityContract(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, overrides)
         check({}, True)
         for overrides in (
+            {"GITHUB_REPOSITORY": "josemirmoura/portico-infinity"},
+            {"GITHUB_REPOSITORY": "josemirmoura/mcp-vps-agent-gateway"},
+            {"GITHUB_REPOSITORY": ""},
             {"GITHUB_EVENT_NAME": "push"},
             {"GITHUB_ACTOR": "unapproved"},
             {"GITHUB_TRIGGERING_ACTOR": "unapproved"},
