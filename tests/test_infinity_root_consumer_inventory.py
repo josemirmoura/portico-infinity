@@ -79,7 +79,7 @@ class RootConsumerInventoryTests(unittest.TestCase):
             "LoadState=loaded", "User=", "DynamicUser=no",
             "ExecStart={ path=/bin/sh ; argv[]=/bin/sh /opt/root-script.sh }",
         ]
-        with mock.patch.object(inv, "run_systemctl", return_value="\\n".join(lines)+"\\n"):
+        with mock.patch.object(inv, "run_systemctl", return_value="\n".join(lines)+"\n"):
             doc = inv.show_unit("portico-ci-test.service")
         self.assertEqual(doc["EnvironmentFiles"], "")
         self.assertEqual(doc["ExecStartPre"], "")
