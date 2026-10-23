@@ -62,7 +62,7 @@ def main():
     p.add_argument("--token-file", type=Path, required=True)
     args = p.parse_args()
     scope = args.scope
-    assert scope.startswith("/data/portico-e2e-")
+    assert scope.startswith("/var/lib/portico-e2e-")
     assert scope.count("/") == 3 and ".." not in scope
     workspace = scope + "/project"
     sibling = scope + "/sibling"
