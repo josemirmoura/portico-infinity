@@ -11,6 +11,7 @@ import (
     "os"
     "path/filepath"
     "strconv"
+    "strings"
     "syscall"
     "time"
 
@@ -312,6 +313,50 @@ func readFilecopyProgress(id string) (filecopyworker.Progress,error) {
 // checkpoints. In particular, stopped oneshots may be inactive/success even
 // though they persisted phase=cancelled, not phase=done.
 func classifyFilecopyUnit(raw string, progress filecopyworker.Progress, progressErr error) (string, string, *int, error) {
+    // Transient systemd-run units are not installed service files. On a
+    // genuine host reboot they disappear even though the root-only SQLite,
+    // immutable manifest and fsynced worker progress survive. Never map a
+    // missing unit to inactive/Result=success or start the copy a second time.
+    load := ""
+    count := 0
+    for _, line := range strings.Split(raw, "\n") {
+        key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+        if found && key == "LoadState" {
+            load = strings.TrimSpace(value)
+            count++
+        }
+    }
+    if count != 1 {
+        return "", "", nil, errors.New("missing or ambiguous systemd LoadState: operator reconciliation required")
+    }
+    if load == "not-found" {
+        if progressErr != nil || !filecopyworker.ValidID(progress.JobID) {
+            return "", "", nil, errors.New("transient filecopy unit disappeared without verified durable progress: operator reconciliation required")
+        }
+        switch progress.Phase {
+        case "done":
+            // The worker writes this only AFTER atomic publication. The usual
+            // filecopyStatus verifier still checks for a nonempty final SHA.
+            if len(progress.SHA256) != 64 || progress.BytesDone < 0 ||
+                progress.BytesDone != progress.BytesTotal {
+                return "", "", nil, errors.New("unverifiable completed filecopy after host restart")
+            }
+            if _, err := hex.DecodeString(progress.SHA256); err != nil {
+                return "", "", nil, errors.New("invalid completed filecopy hash after host restart")
+            }
+            return "done", "durable worker completion survived transient unit loss", nil, nil
+        case "cancelled":
+            return "cancelled", "durable worker cancellation survived transient unit loss", nil, nil
+        case "failed":
+            return "failed", "durable worker failure survived transient unit loss", nil, nil
+        case "queued", "running", "reconcile_required":
+            // During a hard reset the destination rename may have happened
+            // after the last running checkpoint: the broker cannot know.
+            return "reconcile_required", "transient worker missing after host restart/removal; publication outcome uncertain; manual reconciliation required", nil, nil
+        default:
+            return "", "", nil, errors.New("invalid persisted filecopy phase after transient unit loss")
+        }
+    }
     // Systemd may record a stopped oneshot as inactive/dead Result=success.
     // The worker's durably persisted cancelled state takes precedence only
     // AFTER systemd confirms the unit has terminated.
@@ -395,6 +440,9 @@ func (b *Broker) cancelFilecopy(ctx context.Context, req wire.Request, record st
     phase, _ := previous["state"].(string)
     if phase == "done" || phase == "failed" || phase == "cancelled" {
         return deny(req.ID, "job_already_terminal", "filecopy job already terminal")
+    }
+    if phase == "reconcile_required" {
+        return deny(req.ID, "reconcile_required", "filecopy transient unit missing or publication uncertain; operator must inspect before any retry")
     }
     out, err := hostexec.CommandContext(ctx, "systemctl", "stop", record.UnitName).CombinedOutput()
     if err != nil {

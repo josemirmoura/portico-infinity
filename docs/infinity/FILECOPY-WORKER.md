@@ -53,6 +53,17 @@ sudo python3 scripts/infinity-revoke-filecopy-subject.py --subject 'SUJEITO-OAUT
 
 **Limites do gate atual:** o ensaio OAuth real + cópia longa no mesmo runner **foi aprovado na PR #40** com token de conta sintética. Ainda falta testar revogação de sessões humanas e refresh tokens, reboot de host e cancelamento em instalação operacional autorizada. Sem UAT e decisão expressa do proprietário não existe aceite v1.0.
 
+## Reconciliação após desaparecimento da unidade transitória (preparação para reboot real)
+
+O `systemd-run` cria unidades **transitórias**, que podem desaparecer em um reboot completo. O SQLite, o manifesto e os checkpoints persistidos pelo worker sobrevivem em disco, mas isso não comprova, por si, que o arquivo de destino foi publicado. O Broker agora diferencia `LoadState=not-found` de um processo que terminou normalmente.
+
+- Com checkpoint `running`, `queued` ou `reconcile_required`: `job.status` registra **`reconcile_required`** duravelmente. Não devolve `done`, não reinicia a cópia e `job.cancel` não tenta parar outra unidade. O operador deve inspecionar o destino, a cópia temporária, o manifesto, o hash e as evidências antes de decidir qualquer ação.
+- Com checkpoint terminal `done`: o resultado é preservado somente quando hash SHA-256 e contagens de bytes têm formato consistente. `cancelled` e `failed` previamente persistidos também permanecem terminais. O operador ainda pode exigir conferência externa de integridade em incidentes.
+- Checkpoint ausente/corrompido, identidade de job inválida, hash malformado ou `LoadState` ambíguo são erros de reconciliação, nunca prova de sucesso.
+- O caso `LoadState=loaded` mantém o classificador anterior, e jobs Compose não sofrem alteração de semântica.
+
+**Limite da prova:** os testes unitários e regressões de unidades desaparecidas verificam o tratamento de evidências; **isso não é um ensaio de reboot real do kernel/hospedeiro**, que continua gate separado a ser executado exclusivamente em VM descartável antes do aceite final.
+
 ## Ciclo do job
 
 `validated → manifest_persisted → job_sqlite_persisted → systemd_dispatch_pending → running → done | failed | cancelled | reconcile_required`
