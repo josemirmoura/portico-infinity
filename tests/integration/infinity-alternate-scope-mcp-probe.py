@@ -106,6 +106,8 @@ def main():
     else:
         raise AssertionError("secret masking job did not finish")
     assert Path(sibling, ".env").exists()
+    # A sibling is another valid workspace inside the authorized physical ceiling.
+    # Only noncanonical, symlinked, ceiling-root or out-of-scope cwd are invalid.
     for cwd in [scope, sibling + "/../project", scope + "/link", "/opt", "/srv/portico-infinity"]:
         assert_tool(token, "shell.exec", {
             "command": "id -u", "cwd": cwd, "runtime_seconds": 20
