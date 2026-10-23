@@ -16,6 +16,23 @@ O operador controla o ciclo de vida fora do MCP. Uma desinstalação completa pr
 | Todo o teto físico de trabalho, padrão `/opt` | **Preservar integralmente**, inclusive arquivos criados durante a utilização do Infinity, sem `rm -rf /opt` |
 | Community e Cloud | **Nunca alterar** |
 
+## Conta não-root do executor: inventário, não exclusão
+
+O instalador Infinity aceita `--run-as USUARIO`, que **precisa existir antes da instalação**. Não executa `useradd` nem registra propriedade exclusiva da conta; ela pode ser pessoal, de automação ou compartilhada. Por isso, **uma desinstalação segura nunca deve executar `userdel`, `groupdel`, bloquear login, apagar o HOME ou encerrar processos dessa conta como efeito colateral**.
+
+O operador pode realizar uma auditoria **somente leitura**, enquanto o controlador root-owned ainda está instalado:
+
+```bash
+cd /srv/portico-infinity
+sudo python3 scripts/infinity-executor-account-audit.py --inspect
+```
+
+A rotina lê apenas o `shell.run_as` da política local, exige identidade não-root existente, lista grupos e conta processos vivos associados ao UID sem expor argumentos de processos. Reporta possíveis grupos administrativos e **sempre** informa `safe_automatic_account_deletion: false`. Não modifica contas, grupos ou processos, mesmo que o usuário escolhido se chame `portico-infinity-exec`.
+
+O CI cria um usuário sintético **fora do Infinity**, inicia um processo pertencente a ele e executa o fluxo completo de backup e desinstalação local. O gate exige que a conta e o processo continuem intactos após remover o controlador, os contêineres e os volumes. A conta sintética só é eliminada na limpeza do runner descartável.
+
+**Se o proprietário desejar encerrar uma conta dedicada depois do UAT:** isso será uma decisão de administração geral do host, após auditar quem mais a utiliza. Não faz parte dos comandos automáticos de desinstalação Infinity.
+
 ## Fase 1: inventário read-only e backup privado
 
 O script `scripts/infinity-uninstall-backup.py` verifica root, diretórios e scripts não graváveis por terceiros, identidade de contêineres e volumes, ausência de worker ativo/incerto e todos os contêineres Infinity **parados**. Volumes compartilhados, remotos, com mountpoint não padrão ou rótulos incompatíveis bloqueiam o procedimento. Ele não executa ações de Docker que apaguem ou parem serviços.
@@ -109,4 +126,4 @@ O workflow `infinity-uninstall-private-backup-disposable` usa Docker/Compose rea
 - Preservação do volume original, serviço estranho e workspaces; nenhuma exclusão de dados pelo novo utilitário.
 - Bloqueio contra reutilizar rótulo de backup, corrupção e mudança de inventário durante a captura.
 
-**Etapas ainda pendentes:** avaliação e remoção manual isolada da conta do executor, WireGuard, UFW, DNS/TLS e outras dependências compartilhadas; ensaio de restauração integral do serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. O worker e a ponte VPS possuem procedimentos separados, sujeitos aos seus respectivos CI e autorização externa. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.
+**Etapas ainda pendentes:** desmontagem controlada de WireGuard, UFW, DNS/TLS e outras dependências compartilhadas; ensaio de restauração integral do serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. A conta do executor é **preexistente e preservada**, não um artefato a remover; o worker e a ponte VPS possuem procedimentos separados com provas em runners descartáveis e autorização operacional ainda pendente. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.

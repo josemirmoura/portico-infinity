@@ -8,6 +8,8 @@ on:
       - 'tests/scripts/test_infinity_uninstall_local.py'
       - 'scripts/infinity-lifecycle.py'
       - 'tests/scripts/test_infinity_uninstall_backup.py'
+      - 'scripts/infinity-executor-account-audit.py'
+      - 'tests/scripts/test_infinity_executor_account_audit.py'
       - '.github/workflows/infinity-uninstall-private-backup-disposable.yml'
 
 permissions:
@@ -29,6 +31,8 @@ jobs:
           python3 -m unittest -v tests/scripts/test_infinity_uninstall_backup.py
           python3 -m py_compile scripts/infinity-uninstall-local.py
           python3 -m unittest -v tests/scripts/test_infinity_uninstall_local.py
+          python3 -m py_compile scripts/infinity-executor-account-audit.py
+          sudo python3 -m unittest -v tests/scripts/test_infinity_executor_account_audit.py
       - name: Independent disposable Docker and private backup/restore fixture
         shell: bash
         run: |
@@ -38,12 +42,21 @@ jobs:
           test ! -e /srv/portico-infinity
           test ! -e /var/backups/portico-infinity
           test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          # The installer requires an EXISTING non-root account. This one is
+          # synthetic and belongs to the disposable runner, not to Infinity.
+          executor="infinity-ci-exec"
+          ! id "$executor" >/dev/null 2>&1
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin "$executor"
+          sleep_pid=""
           lab="/var/backups/portico-infinity"
           controller="/srv/portico-infinity"
           job="runner-$GITHUB_RUN_ID"
           [[ "$job" =~ ^runner-[0-9]{1,24}$ ]]
           cleanup() {
             set +e
+            if test -n "$sleep_pid"; then sudo kill "$sleep_pid" >/dev/null 2>&1 || true; fi
+            sudo pkill -u "$executor" >/dev/null 2>&1 || true
+            sudo userdel "$executor" >/dev/null 2>&1 || true
             if test -d "$controller"; then
               (cd "$controller" && sudo docker compose -p portico-infinity down -v --remove-orphans) >/dev/null 2>&1 || true
             fi
@@ -55,10 +68,18 @@ jobs:
           trap cleanup EXIT
 
           sudo install -d -o root -g root -m 0755 "$controller/scripts"
+          sudo install -d -o root -g root -m 0755 "$controller/config"
           sudo install -d -o root -g root -m 0700 "$lab"
           sudo install -o root -g root -m 0644 scripts/infinity-lifecycle.py "$controller/scripts/infinity-lifecycle.py"
           sudo install -o root -g root -m 0644 scripts/infinity-uninstall-backup.py "$controller/scripts/infinity-uninstall-backup.py"
           sudo install -o root -g root -m 0644 scripts/infinity-uninstall-local.py "$controller/scripts/infinity-uninstall-local.py"
+          sudo install -o root -g root -m 0644 scripts/infinity-executor-account-audit.py "$controller/scripts/infinity-executor-account-audit.py"
+          printf 'version: 1\nshell:\n  run_as: %s\n' "$executor" | sudo tee "$controller/config/policy.yaml" >/dev/null
+          sudo chmod 0600 "$controller/config/policy.yaml"
+          sudo -u "$executor" /bin/sleep 200 &
+          sleep_pid=$!
+          sleep 0.2
+          sudo pgrep -u "$executor" -x sleep >/dev/null
           sudo tee "$controller/compose.yaml" >/dev/null <<'YAML'
           name: portico-infinity
           services:
@@ -82,6 +103,16 @@ jobs:
           (cd "$controller" && sudo docker compose -p portico-infinity stop)
 
           cd "$controller"
+          sudo python3 scripts/infinity-executor-account-audit.py --inspect > /tmp/infinity-account-readonly.json
+          python3 - <<'PY'
+          import json
+          a=json.load(open('/tmp/infinity-account-readonly.json'))
+          assert a['username']=='infinity-ci-exec'
+          assert a['safe_automatic_account_deletion'] is False
+          assert a['account_created_by_infinity'] is False
+          assert a['live_process_observation']['executor_uid_processes_seen'] >= 1
+          print('EXISTING_EXECUTOR_ACCOUNT_INVENTORY_AND_ACTIVE_FOREIGN_PROCESS: PASS')
+          PY
           sudo python3 scripts/infinity-uninstall-backup.py --inspect >/tmp/infinity-private-inspect.json
           python3 - <<'PY'
           import json
@@ -145,6 +176,9 @@ jobs:
           test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
           test -z "$(docker volume ls -q --filter label=com.docker.compose.project=portico-infinity)"
           test "$(docker inspect unrelated-full-backup-fixture -f '{{.State.Running}}')" = true
+          test -n "$(id -u "$executor")"
+          sudo pgrep -u "$executor" -x sleep >/dev/null
           sudo test -f "$archive"
           sudo grep -q 'local-resources-removed' "$lab/infinity-uninstall-$job.local-intent.json"
           echo 'ISOLATED FULL LOCAL REMOVAL AFTER RESTORED VERIFIED BACKUP: PASS'
+          echo 'EXISTING_RUN_AS_USER_AND_ITS_INDEPENDENT_PROCESS_PRESERVED_AFTER_UNINSTALL: PASS'
