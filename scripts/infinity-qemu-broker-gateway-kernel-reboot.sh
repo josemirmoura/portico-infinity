@@ -203,7 +203,7 @@ if test "$ready" != 1; then
 fi
 python3 tests/integration/infinity-kernel-stack-probe.py --phase before \
   --endpoint http://127.0.0.1:18080/mcp --token-file "$LAB/token" --scope "$SCOPE"
-ssh_guest "sudo /usr/local/libexec/portico-infinity/vps-agent audit-status --socket /run/portico-infinity/broker.sock" > "$LAB/audit-before.json"
+ssh_guest "sudo /bin/sh -c '. /etc/portico-kernel-broker.env; export VPS_AGENT_ADMIN_TOKEN; exec /usr/local/libexec/portico-infinity/vps-agent audit-status --socket /run/portico-infinity/broker.sock'" > "$LAB/audit-before.json"
 python3 - "$LAB/audit-before.json" <<'PY'
 import json,sys
 j=json.load(open(sys.argv[1]))
@@ -231,7 +231,7 @@ done
 test "$ready" = 1 || { echo "Broker/Gateway failed to recover after kernel reboot" >&2; exit 1; }
 python3 tests/integration/infinity-kernel-stack-probe.py --phase after \
   --endpoint http://127.0.0.1:18080/mcp --token-file "$LAB/token" --scope "$SCOPE"
-ssh_guest "sudo /usr/local/libexec/portico-infinity/vps-agent audit-status --socket /run/portico-infinity/broker.sock" > "$LAB/audit-after.json"
+ssh_guest "sudo /bin/sh -c '. /etc/portico-kernel-broker.env; export VPS_AGENT_ADMIN_TOKEN; exec /usr/local/libexec/portico-infinity/vps-agent audit-status --socket /run/portico-infinity/broker.sock'" > "$LAB/audit-after.json"
 python3 - "$LAB/audit-before.json" "$LAB/audit-after.json" <<'PY'
 import json,sys
 before=json.load(open(sys.argv[1]))
