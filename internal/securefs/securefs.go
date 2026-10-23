@@ -278,6 +278,76 @@ func (m *Manager) MkdirAll(dirname string, perm os.FileMode) error {
 }
 
 
+// CreateShellWorkspace creates exactly one new leaf directory for an explicitly
+// authorized non-root shell identity. Existing projects and parent directories
+// are never changed. Unlike MkdirAll, this operation intentionally fails if
+// the requested leaf already exists, requiring explicit operator inspection.
+// uid/gid are derived by the Broker from the fixed shell.run_as policy, never
+// supplied by the MCP caller.
+func (m *Manager) CreateShellWorkspace(dirname string, uid, gid int) error {
+    if uid <= 0 || gid < 0 {
+        return errors.New("shell workspace requires a non-root policy account")
+    }
+    rootPath, rel, err := selectRoot(m.writeRoots, dirname)
+    if err != nil { return err }
+    if rel == "." {
+        return errors.New("cannot change the owner of an authorized root")
+    }
+    root, err := openRootNoSymlink(m.physical(rootPath))
+    if err != nil { return err }
+    defer root.Close()
+
+    // The entire parent tree must already exist and must contain no symbolic
+    // links. No implicit ancestor creation or ownership transfers are allowed.
+    parent := filepath.Dir(rel)
+    ancestor := "."
+    if parent != "." {
+        for _, part := range strings.FieldsFunc(filepath.ToSlash(parent), func(r rune) bool { return r == '/' }) {
+            if part == "" || part == "." { continue }
+            if part == ".." { return errors.New("path traversal is forbidden") }
+            ancestor = filepath.Join(ancestor, part)
+            meta, statErr := root.Lstat(ancestor)
+            if statErr != nil { return fmt.Errorf("workspace parent must already exist: %w", statErr) }
+            if meta.Mode()&os.ModeSymlink != 0 || !meta.IsDir() {
+                return fmt.Errorf("workspace ancestor %q is not a safe directory", ancestor)
+            }
+        }
+    }
+    if err := root.Mkdir(rel, 0o700); err != nil {
+        // Refuse to repurpose an existing path or race winner, including empty
+        // directories created by other processes.
+        return fmt.Errorf("workspace must be a new leaf directory: %w", err)
+    }
+    handle, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+    if err != nil {
+        return fmt.Errorf("workspace created but could not be inspected: MANUAL RECOVERY required: %w", err)
+    }
+    defer handle.Close()
+    // fchown applies to the already opened inode even if the pathname changes
+    // concurrently. Never attempt rollback by filename after any failure.
+    if err := handle.Chown(uid, gid); err != nil {
+        return fmt.Errorf("workspace created but fchown failed: MANUAL RECOVERY required: %w", err)
+    }
+    if err := handle.Chmod(0o750); err != nil {
+        return fmt.Errorf("workspace fchmod failed: MANUAL RECOVERY required: %w", err)
+    }
+    meta, err := handle.Stat()
+    if err != nil { return fmt.Errorf("workspace owner verification failed: MANUAL RECOVERY required: %w", err) }
+    stat, ok := meta.Sys().(*syscall.Stat_t)
+    if !ok || int(stat.Uid) != uid || int(stat.Gid) != gid || meta.Mode().Perm() != 0o750 {
+        return errors.New("workspace identity verification failed: MANUAL RECOVERY required")
+    }
+    // Detect the common rename/symlink swap after the descriptor-bound
+    // mutation. The operation is not a transactional guarantee against future
+    // external renames; independent host mutators remain an operator risk.
+    named, err := root.Lstat(rel)
+    if err != nil || named.Mode()&os.ModeSymlink != 0 || !os.SameFile(meta, named) {
+        return errors.New("workspace name changed concurrently: MANUAL RECOVERY required")
+    }
+    return nil
+}
+
+
 type Entry struct {
 	Name    string    `json:"name"`
 	Path    string    `json:"path"`

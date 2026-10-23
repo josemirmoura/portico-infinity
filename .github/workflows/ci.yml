@@ -257,4 +257,4 @@ jobs:
             GOPATH="$GOPATH" \
             GOCACHE="$GOCACHE" \
             GOMODCACHE="$GOMODCACHE" \
-            go test -count=1 -run TestSystemdRunnerSmoke ./internal/jobs
+            go test -count=1 -run 'Test(SystemdRunnerSmoke|ShellWorkspaceRealSystemdSmoke)' ./internal/jobs

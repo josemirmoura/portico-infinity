@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -1784,8 +1785,39 @@ func (b *Broker) mkdir(ctx context.Context, req wire.Request, fs *securefs.Manag
 	if b.State == nil {
 		return deny(req.ID, "state_required", "mkdir requires durable state")
 	}
+	var in struct {
+		ForShell bool `json:"for_shell"`
+	}
+	// Older clients send no args at all for plain file.mkdir. Nil input
+	// means for_shell=false; do not break the existing Community/Infinity API.
+	if len(req.Args) > 0 {
+		if err := json.Unmarshal(req.Args, &in); err != nil {
+			return deny(req.ID, "invalid_args", err.Error())
+		}
+	}
+	var shellUID, shellGID int
+	if in.ForShell {
+		// Keep the legacy Community mkdir behavior unchanged. This opt-in is
+		// available only for Infinity's protected root-owned control plane.
+		if os.Getenv("VPS_AGENT_INFINITY_PROTECTED_ROOT") == "" {
+			return deny(req.ID, "permission_denied", "shell workspace creation is Infinity-only")
+		}
+		allowed, err := b.canShellCWD(ctx, req.Subject, req.Resource)
+		if err != nil { return deny(req.ID, "state_error", err.Error()) }
+		if !allowed { return deny(req.ID, "permission_denied", "shell workspace is outside authorized shell roots") }
+		runAs := b.Policy.Shell.RunAs
+		if runAs == "" { runAs = "vps-agent-exec" }
+		account, err := user.Lookup(runAs)
+		if err != nil { return deny(req.ID, "permission_denied", "configured shell account does not exist") }
+		shellUID, err = strconv.Atoi(account.Uid)
+		if err != nil { return deny(req.ID, "permission_denied", "shell account UID is invalid") }
+		shellGID, err = strconv.Atoi(account.Gid)
+		if err != nil || shellUID <= 0 || shellGID < 0 {
+			return deny(req.ID, "permission_denied", "shell workspace requires non-root policy account")
+		}
+	}
 	requestHash, err := state.HashRequest(map[string]any{
-		"subject": req.Subject, "tool": req.Tool, "resource": req.Resource,
+		"subject": req.Subject, "tool": req.Tool, "resource": req.Resource, "for_shell": in.ForShell,
 	})
 	if err != nil {
 		return deny(req.ID, "hash_error", err.Error())
@@ -1803,9 +1835,15 @@ func (b *Broker) mkdir(ctx context.Context, req wire.Request, fs *securefs.Manag
 		return deny(req.ID, "reconcile_required", "previous mkdir outcome is uncertain")
 	}
 
-	if err := fs.MkdirAll(req.Resource, 0o750); err != nil {
+	var mkdirErr error
+	if in.ForShell {
+		mkdirErr = fs.CreateShellWorkspace(req.Resource, shellUID, shellGID)
+	} else {
+		mkdirErr = fs.MkdirAll(req.Resource, 0o750)
+	}
+	if mkdirErr != nil {
 		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
-		return deny(req.ID, "permission_denied", err.Error())
+		return deny(req.ID, "permission_denied", mkdirErr.Error())
 	}
 	result, _ := json.Marshal(map[string]any{
 		"path": req.Resource, "created": true,

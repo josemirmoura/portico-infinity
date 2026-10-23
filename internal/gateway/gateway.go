@@ -124,6 +124,7 @@ type fileWriteOutput struct {
 
 type fileMkdirInput struct {
 	Path string `json:"path" jsonschema:"absolute directory path inside an authorized writable root"`
+	ForShell bool `json:"for_shell,omitempty" jsonschema:"create a new leaf owned by the non-root shell account configured by policy; existing paths are never changed"`
 }
 
 type fileMkdirOutput struct {
@@ -392,7 +393,8 @@ func newMCPServer(exec Executor, metrics *runtimeMetrics) *mcp.Server {
 	mcp.AddTool(server, annotatedTool("file.mkdir", "Create an authorized directory tree without following symlink components."),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in fileMkdirInput) (*mcp.CallToolResult, fileMkdirOutput, error) {
 			var out fileMkdirOutput
-			if err := s.call(ctx, "file.mkdir", in.Path, "mkdir", nil, &out, true, ""); err != nil {
+			args, _ := json.Marshal(map[string]any{"for_shell": in.ForShell})
+			if err := s.call(ctx, "file.mkdir", in.Path, "mkdir", args, &out, true, ""); err != nil {
 				return nil, out, err
 			}
 			return nil, out, nil
