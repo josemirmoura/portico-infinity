@@ -1,6 +1,6 @@
 # Infinity I7 | Preparação para desinstalação integral
 
-**Estado:** fase 1 implementada e testada em ambiente descartável. **Não há comando de remoção integral autorizado ou implementado neste procedimento.** Nunca executar em SRV-IA/VPS sem autorização específica do proprietário.
+**Estado:** fases 1 (backup) e 2 (remoção **local** condicionada ao backup) implementadas e testadas em ambiente descartável. **A desinstalação multi-host completa permanece pendente**, incluindo worker instalado no host e dependências VPS/WireGuard/DNS. Nunca executar em SRV-IA/VPS sem autorização específica do proprietário.
 
 ## Contrato e fronteiras
 
@@ -47,6 +47,31 @@ O arquivo `/var/backups/portico-infinity/infinity-uninstall-<LABEL>.tar` e seu J
 
 **Importante:** validar SHA-256 confirma integridade do backup criado, mas **não prova que o serviço foi restaurado e voltou a operar**. Antes de exclusão irreversível, efetuar restauração em laboratório isolado, conferindo permissões, banco de identidade, auditoria, conteúdo de volumes e logins. Registrar hashes e evidências numéricas sem divulgar credenciais.
 
+## Fase 2: remoção local após restauração independente
+
+**Somente depois** de o operador ter confirmado o backup SHA-256, ensaiado a restauração em máquina isolada e autorizado especificamente a remoção local, é possível executar o módulo `scripts/infinity-uninstall-local.py`. Ele exige contêineres locais parados, manifesto sem alterações, ausência de workers incertos, ausência de mounts sob o controlador e hashes correspondentes.
+
+```bash
+cd /srv/portico-infinity
+sudo python3 scripts/infinity-uninstall-local.py \
+  --backup-label INF-20261023-EXEMPLO --dry-run
+
+# Somente após conferir os destinos exibidos e comprovar a restauração:
+# Não execute sem autorização específica. Os dois valores são derivados do
+# SHA-256 do backup e aparecem no plano --dry-run.
+sudo python3 scripts/infinity-uninstall-local.py \
+  --backup-label INF-20261023-EXEMPLO \
+  --remove-local \
+  --confirm 'REMOVE-LOCAL-INFINITY-<20_DIGITOS_DO_SHA>' \
+  --restore-attested 'RESTORE-TESTED-<20_DIGITOS_DO_SHA>'
+```
+
+A exclusão local usa `infinity-lifecycle.py` para interromper/remover exclusivamente contêineres e redes identificados, verifica cada volume privado antes de `docker volume rm`, e por último remove o controlador **somente no caminho literal `/srv/portico-infinity`** com `shutil.rmtree` resistente a ataques de links simbólicos. O arquivo de backup e um diário de intenção/conclusão `root:root 0600` permanecem fora do diretório removido, em `/var/backups/portico-infinity`. Se qualquer etapa falhar, **não há reexecução automática nem rollback implícito**; o operador deve reconciliar estado e recuperar os dados do backup.
+
+A confirmação `RESTORE-TESTED` é uma declaração explícita do operador, **não uma verificação técnica da restauração em produção**. O fluxo E2E testou a extração real da configuração e do volume de identidade **sintéticos** antes da remoção.
+
+**Exclusões proibidas/fora do escopo:** arquivos dentro do teto físico, modelos, outros projetos do usuário, volumes de outros projetos, worker fixo em `/usr/local/libexec`, conta do executor, rede WireGuard, regra de firewall UFW, proxy/TLS/DNS e bridge da VPS. Esses últimos são etapas independentes com inventário e decisão de proprietário específicos; não alegar desinstalação integral de dois hosts após `--remove-local`.
+
 ## Provas e falhas intencionais
 
 O workflow `infinity-uninstall-private-backup-disposable` usa Docker/Compose reais, controlador sintético root-owned, volume privado de identidade com conteúdo fictício e contêiner estrangeiro. Ele exige:
@@ -56,4 +81,4 @@ O workflow `infinity-uninstall-private-backup-disposable` usa Docker/Compose rea
 - Preservação do volume original, serviço estranho e workspaces; nenhuma exclusão de dados pelo novo utilitário.
 - Bloqueio contra reutilizar rótulo de backup, corrupção e mudança de inventário durante a captura.
 
-**A segunda fase ainda está pendente**: implementar contrato de exclusão por manifesto fixado e confirmação de perdas, ensaiar exclusão total e restauração da identidade em runner/VM efêmero, certificar isolamento de VPS/Community/Cloud e obter autorização do proprietário para UAT em ambiente operacional. Nem `--uninstall-runtime` nem `--verify` equivalem à desinstalação completa.
+**Etapas ainda pendentes:** inventário e desmontagem independente do worker do host, conta do executor, ponte VPS, WireGuard, UFW, DNS/TLS e outras dependências compartilhadas; ensaio de restauração integral de serviço OAuth/SQLite sob demanda e aceite operacional do proprietário. A remoção local testada **não equivale à desinstalação completa do sistema distribuído**.
