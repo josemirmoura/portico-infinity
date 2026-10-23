@@ -6,7 +6,12 @@ test "${CI:-}" = true && test "${RUNNER_ENVIRONMENT:-}" = github-hosted
 test "${GITHUB_EVENT_NAME:-}" = pull_request
 [[ "${GITHUB_RUN_ID:-}" =~ ^[0-9]{1,24}$ ]]
 test "$(uname -m)" = x86_64
-test -c /dev/kvm && test -w /dev/kvm || { echo "KVM unavailable; real guest reboot NOT VERIFIED" >&2; exit 2; }
+if test -c /dev/kvm && test -w /dev/kvm; then
+  ACCEL=kvm
+else
+  ACCEL=tcg
+fi
+echo "QEMU guest acceleration mode: $ACCEL (guest kernel still boots and resets independently)"
 LAB="$(mktemp -d "${RUNNER_TEMP:?}/portico-qemu-reboot.XXXXXXXX")"
 chmod 0700 "$LAB"
 QEMU_PID=""
@@ -51,7 +56,7 @@ printf "instance-id: infinity-reboot-%s\nlocal-hostname: infinity-reboot-vm\n" "
 cloud-localds "$LAB/seed.iso" "$LAB/user-data" "$LAB/meta-data"
 test ! -e "$LAB/qmp.sock"
 ! ss -ltn | grep -q ":12022 " || { echo "VM SSH port already bound" >&2; exit 2; }
-qemu-system-x86_64 -accel kvm -machine q35 -m 2048 -smp 2 -nographic -monitor none \
+qemu-system-x86_64 -machine "q35,accel=$ACCEL" -m 2048 -smp 2 -nographic -monitor none \
   -bios "$OVMF" \
   -drive "file=$LAB/ubuntu-24.04-minimal-cloudimg-amd64.img,if=virtio,format=qcow2" \
   -drive "file=$LAB/seed.iso,if=virtio,media=cdrom,format=raw" \
