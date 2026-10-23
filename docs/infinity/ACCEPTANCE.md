@@ -1,5 +1,19 @@
 # Gates de aceite: Pórtico Infinity
 
+## Bloqueio preventivo do publicador herdado
+
+O workflow `.github/workflows/release.yml` veio do Pórtico Community e publica tags,
+imagens GHCR e GitHub Releases. No repositório Infinity, esse caminho deve
+**falhar fechado**, mesmo se acionado pelo proprietário: a confirmação genérica
+`PUBLICAR <tag>` não comprova o UAT e o GO específicos da edição Infinity.
+O job de validação confere a identidade do repositório antes do checkout;
+os jobs que publicam imagens e GitHub Releases possuem travas adicionais
+`github.repository`. Regressões negativas verificam a rejeição de Infinity,
+aliases e forks. Um processo próprio de release Infinity somente poderá ser
+habilitado depois do UAT do proprietário e de seu GO explícito sobre o SHA.
+O bloqueio não interfere no código nem na instalação do Community.
+
+
 ## Atualização verificável em 23/10/2026 (pós-PR #52)
 
 A tabela de 16/10 abaixo é histórica. Os novos ensaios ocorreram exclusivamente em runners descartáveis do GitHub; não autorizam atualização do SRV-IA nem publicação.
