@@ -1,0 +1,155 @@
+name: infinity-alternate-scope-real-docker-disposable
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/infinity-alternate-scope-real-docker-disposable.yml'
+      - 'tests/integration/infinity-alternate-scope-mcp-probe.py'
+      - 'internal/broker/infinity_shell_workspace.go'
+      - 'scripts/configure-infinity-opt.py'
+      - 'scripts/infinity-scope.py'
+
+permissions:
+  contents: read
+
+jobs:
+  alternate-ceiling-real-broker-shell:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert disposable host and validate MCP probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          test ! -e /usr/local/libexec/portico-infinity
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]]
+          docker compose version
+          python3 -m py_compile tests/integration/infinity-alternate-scope-mcp-probe.py
+      - name: Prepare protected controller and alternate physical scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCOPE="/data/portico-e2e-$GITHUB_RUN_ID"
+          test ! -e "$SCOPE"
+          sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin portico-infinity-exec
+          sudo install -d -o root -g root -m 0755 /srv/portico-infinity
+          sudo cp -a "$GITHUB_WORKSPACE"/. /srv/portico-infinity/
+          sudo chown -R root:root /srv/portico-infinity
+          sudo chmod -R go-w /srv/portico-infinity
+          test ! -L /data
+          if [ -e /data ] && [ ! -d /data ]; then
+            echo "alternate scope ancestor /data not a directory" >&2
+            exit 1
+          fi
+          sudo install -d -o root -g root -m 0755 /data "$SCOPE"
+          sudo install -d -o portico-infinity-exec -g portico-infinity-exec -m 0755 "$SCOPE/project" "$SCOPE/sibling"
+          printf 'ALT_CI_SECRET=synthetic-only\n' | sudo tee "$SCOPE/project/.env" >/dev/null
+          printf 'ALT_SIBLING_SECRET=synthetic-only\n' | sudo tee "$SCOPE/sibling/.env" >/dev/null
+          sudo chmod 0644 "$SCOPE/project/.env" "$SCOPE/sibling/.env"
+          sudo ln -s project "$SCOPE/link"
+          test "$(stat -c %a "$SCOPE/project/.env")" = 644
+          cd /srv/portico-infinity
+          sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
+          ! sudo -u portico-infinity-exec test -w /srv/portico-infinity
+      - name: Configure real Docker Broker with /data physical ceiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /srv/portico-infinity
+          SCOPE="/data/portico-e2e-$GITHUB_RUN_ID"
+          sudo env VPS_AGENT_LANG=pt-BR VPS_AGENT_LANG_EXPLICIT=1 \
+            bash scripts/init.sh --scope "$SCOPE" --run-as portico-infinity-exec --lang pt-BR
+          sudo python3 scripts/configure-infinity-opt.py --env .env --policy config/policy.yaml
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          p=Path(".env")
+          updates={
+              "COMPOSE_PROJECT_NAME": "portico-infinity-alt-ci",
+              "VPS_AGENT_INSTANCE_NAME": "portico-infinity-alt-ci",
+              "VPS_AGENT_INFINITY_PROTECTED_ROOT": "/srv/portico-infinity",
+              "VPS_AGENT_PORT": "18083",
+              "VPS_AGENT_BIND_ADDRESS": "127.0.0.1",
+              "VPS_AGENT_AUTH_MODE": "static",
+              "VPS_AGENT_GATEWAY_IMAGE": "portico-infinity-alt-gateway:disposable",
+              "VPS_AGENT_BROKER_IMAGE": "portico-infinity-alt-broker:disposable",
+          }
+          output=[]
+          used=set()
+          for line in p.read_text().splitlines():
+              key=line.partition("=")[0]
+              if key in updates:
+                  assert key not in used, "duplicate environment key"
+                  used.add(key)
+                  output.append(f"{key}={updates[key]}")
+              else:
+                  output.append(line)
+          output.extend(f"{k}={v}" for k,v in updates.items() if k not in used)
+          p.write_text("\n".join(output)+"\n")
+          p.chmod(0o600)
+          PY
+          sudo python3 scripts/check-infinity-layout.py --run-as portico-infinity-exec
+          sudo docker compose -p portico-infinity-alt-ci config --quiet
+          sudo grep -Fq "VPS_AGENT_SCOPE_ROOT=$SCOPE" .env
+          sudo grep -Fq -- "- $SCOPE" config/policy.yaml
+          sudo grep -Fq 'full_mode_enabled: false' config/policy.yaml
+      - name: Start real Broker and Gateway; test MCP shell in /data
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCOPE="/data/portico-e2e-$GITHUB_RUN_ID"
+          cd /srv/portico-infinity
+          sudo docker compose -p portico-infinity-alt-ci up -d --build broker gateway
+          ready=0
+          for _ in $(seq 1 100); do
+            if curl -fsS --connect-timeout 2 --max-time 4 http://127.0.0.1:18083/healthz >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = 1 || {
+            sudo docker compose -p portico-infinity-alt-ci ps
+            echo "alternate ceiling Broker/Gateway unhealthy" >&2
+            exit 1
+          }
+          TOKEN="$(sudo sed -n 's/^VPS_AGENT_STATIC_TOKEN=//p' .env)"
+          test -n "$TOKEN" && test "$(printf %s "$TOKEN" | wc -c)" -ge 40
+          echo "::add-mask::$TOKEN"
+          install -m 0600 /dev/null "$RUNNER_TEMP/infinity-alt-token"
+          printf '%s\n' "$TOKEN" > "$RUNNER_TEMP/infinity-alt-token"
+          cd "$GITHUB_WORKSPACE"
+          if ! python3 tests/integration/infinity-alternate-scope-mcp-probe.py \
+            --scope "$SCOPE" --token-file "$RUNNER_TEMP/infinity-alt-token"; then
+            echo "CI shell proof failed: inspected only synthetic transient job state" >&2
+            sudo systemctl list-units --all --no-pager 'vps-agent-job-*' || true
+            sudo journalctl --no-pager --lines=60 -u 'vps-agent-job-*' --output=short || true
+            sudo systemctl --failed --all --no-pager || true
+            sudo journalctl --no-pager -p warning --since '-5 min' --lines=70 --output=short || true
+            findmnt -T "$SCOPE/project" -o TARGET,FSTYPE,OPTIONS || true
+            exit 1
+          fi
+          sudo test ! -e /opt/alt-scope-escape
+          sudo test ! -e /etc/portico-e2e-escape
+          cd /srv/portico-infinity
+          sudo docker compose -p portico-infinity-alt-ci exec -T broker \
+            /usr/local/bin/vps-agent audit-status --socket /run/vps-agent/broker.sock
+      - name: Cleanup only disposable test instance
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ "$RUNNER_ENVIRONMENT" != github-hosted ] || [ "$GITHUB_EVENT_NAME" != pull_request ] ||
+             ! [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]]; then
+            echo "cleanup not permitted outside disposable pull-request runner" >&2
+            exit 1
+          fi
+          if [ -d /srv/portico-infinity ]; then
+            cd /srv/portico-infinity
+            sudo docker compose -p portico-infinity-alt-ci down --remove-orphans --volumes
+          fi
+          sudo rm -rf -- "/data/portico-e2e-$GITHUB_RUN_ID" /srv/portico-infinity
