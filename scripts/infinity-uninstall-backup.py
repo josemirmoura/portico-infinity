@@ -26,18 +26,14 @@ ALLOWED_VOLUME = re.compile(r"portico-infinity_[A-Za-z0-9_-]+\Z")
 ARCHIVE_PATTERN = re.compile(r"infinity-uninstall-[0-9A-Za-z_-]{8,64}[.]tar\Z")
 CONFIRM = "BACKUP-INFINITY-BEFORE-UNINSTALL"
 
-spec = importlib.util.spec_from_file_location("infinity_lifecycle",
-    Path(__file__).resolve().parent / "infinity-lifecycle.py")
-assert spec and spec.loader
-life = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(life)
+life = None  # Load ONLY after operator verifies root-owned controller and script.
 
 
 class BackupBlocked(RuntimeError):
     pass
 
 
-def protected(path: Path, *, directory: bool, mode: int | None = None) -> os.stat_result:
+def protected(path: Path, *, directory: bool, mode: int | None = None, owner_root: bool = True) -> os.stat_result:
     """Reject symlinks in every existing ancestor; ensure root ownership."""
     if not path.is_absolute() or ".." in path.parts:
         raise BackupBlocked("noncanonical protected path")
@@ -46,13 +42,14 @@ def protected(path: Path, *, directory: bool, mode: int | None = None) -> os.sta
             metadata = part.lstat()
         except FileNotFoundError:
             raise BackupBlocked("missing protected path")
-        if stat.S_ISLNK(metadata.st_mode) or metadata.st_uid != 0:
+        if stat.S_ISLNK(metadata.st_mode) or (metadata.st_uid != 0 and
+                (part != path or owner_root)):
             raise BackupBlocked("protected path has symlink/non-root ownership")
         if part != path and (not stat.S_ISDIR(metadata.st_mode) or metadata.st_mode & 0o022):
             raise BackupBlocked("untrusted protected ancestor directory")
         if part == path:
             good_type = stat.S_ISDIR if directory else stat.S_ISREG
-            if not good_type(metadata.st_mode) or metadata.st_mode & 0o022:
+            if not good_type(metadata.st_mode) or metadata.st_mode & (0o022 if owner_root else 0o002):
                 raise BackupBlocked("unsafe protected object")
             if mode is not None and metadata.st_mode & 0o777 != mode:
                 raise BackupBlocked("private backup mode violation")
@@ -60,16 +57,28 @@ def protected(path: Path, *, directory: bool, mode: int | None = None) -> os.sta
 
 
 def require_context() -> None:
+    global life
     if os.geteuid() != 0 or Path.cwd().resolve() != CONTROLLER:
         raise BackupBlocked("operator must run as root in Infinity controller")
-    life.verify_operator()
     protected(CONTROLLER, directory=True)
     protected(CONTROLLER / "scripts/infinity-uninstall-backup.py", directory=False)
+    protected(CONTROLLER / "scripts/infinity-lifecycle.py", directory=False)
+    # Delayed import is deliberate: never execute neighbor Python code as root
+    # before verifying ownership and writable ancestors.
+    if life is None:
+        spec = importlib.util.spec_from_file_location("infinity_lifecycle",
+            CONTROLLER / "scripts/infinity-lifecycle.py")
+        if spec is None or spec.loader is None:
+            raise BackupBlocked("cannot load trusted lifecycle implementation")
+        life = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(life)
+    life.verify_operator()
     life.ensure_no_active_workers()
     life.ensure_no_unreconciled_filecopy_checkpoints()
 
 
-def validated_snapshot(command=life.run, *, controller: Path = CONTROLLER) -> dict:
+def validated_snapshot(command=None, *, controller: Path = CONTROLLER) -> dict:
+    command = command or life.run
     containers, networks, volumes = life.inventory(command)
     if any(c["running"] for c in containers):
         raise BackupBlocked("stop Infinity containers using authorized reversible deactivation before backup")
@@ -90,7 +99,7 @@ def validated_snapshot(command=life.run, *, controller: Path = CONTROLLER) -> di
         expected = Path("/var/lib/docker/volumes") / name / "_data"
         if location != expected:
             raise BackupBlocked("nonstandard/remote Docker volume: requires separate backup procedure")
-        protected(location, directory=True)
+        protected(location, directory=True, owner_root=False)
         ids = life._ids(command(["docker", "ps", "-aq", "--no-trunc",
                                  "--filter", "volume=" + name, "--format", "{{.ID}}"]))
         if not set(ids).issubset({c["id"] for c in containers}):
@@ -128,7 +137,8 @@ def archive_sources(snapshot: dict):
 
 
 def make_backup(snapshot: dict, label: str, *, root: Path = BACKUP_ROOT,
-                command=life.run) -> dict:
+                command=None) -> dict:
+    command = command or life.run
     # Only the owner can create these data-at-rest *unencrypted* private
     # archives. NEVER attach, upload, print contents or copy to a public CI
     # artifact. Root:root 0700, files 0600, outside /opt and /srv.
@@ -148,7 +158,7 @@ def make_backup(snapshot: dict, label: str, *, root: Path = BACKUP_ROOT,
         with os.fdopen(fd, "wb") as stream:
             with tarfile.open(fileobj=stream, mode="w", dereference=False) as archive:
                 for source, arcname in archive_sources(snapshot):
-                    protected(source, directory=True)
+                    protected(source, directory=True, owner_root=(source == CONTROLLER))
                     archive.add(source, arcname=arcname, recursive=True)
             stream.flush()
             os.fsync(stream.fileno())
@@ -156,7 +166,8 @@ def make_backup(snapshot: dict, label: str, *, root: Path = BACKUP_ROOT,
         # the backup. Concurrent deletion/restart fails closed and invalidates it.
         if validated_snapshot(command) != snapshot:
             raise BackupBlocked("Infinity inventory changed during backup")
-        digest = hashlib.file_digest(staging.open("rb"), "sha256").hexdigest()
+        with staging.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
         with tarfile.open(staging, "r") as archive:
             names = {member.name for member in archive.getmembers()}
             if "controller" not in names or any("volumes/" + v["name"] not in names for v in snapshot["volumes"]):
@@ -164,7 +175,10 @@ def make_backup(snapshot: dict, label: str, *, root: Path = BACKUP_ROOT,
             if any(member.name.startswith("/") or ".." in Path(member.name).parts
                    for member in archive.getmembers()):
                 raise BackupBlocked("archive contains unsafe entry")
-        os.rename(staging, destination)  # private backup root; destination did not exist
+        # os.link is NOREPLACE, unlike os.rename which could clobber an
+        # archive created by another operator after our preflight.
+        os.link(staging, destination, follow_symlinks=False)
+        staging.unlink()
         staging = None
         document = {"schema": 1, "archive": name, "sha256": digest,
                     "bytes": destination.stat().st_size,
