@@ -40,6 +40,10 @@ jobs:
           grep -Fq -- '--cacert "$TLS/ca.pem"' tests/integration/infinity-qemu-oauth-guest-setup.sh
           ! grep -Fq 'VPS_AGENT_INTEGRATED_INTROSPECTION_URL=http://' tests/integration/infinity-qemu-oauth-guest-setup.sh
           grep -q 'system_reset' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          grep -Fq 'GUEST_PROBE_SHA_AFTER' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          grep -Fq 'infinity-qemu-oauth-guest-setup.sh --verify' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          ! grep -Fq 'sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --verify' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          ! grep -Fq 'sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --diagnose' scripts/infinity-qemu-oauth-kernel-reboot.sh
       - name: Boot, authenticate, reboot and reauthenticate in SAME guest kernel
         shell: bash
         env:
