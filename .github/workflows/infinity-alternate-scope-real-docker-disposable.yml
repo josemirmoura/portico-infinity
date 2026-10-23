@@ -118,8 +118,13 @@ jobs:
           install -m 0600 /dev/null "$RUNNER_TEMP/infinity-alt-token"
           printf '%s\n' "$TOKEN" > "$RUNNER_TEMP/infinity-alt-token"
           cd "$GITHUB_WORKSPACE"
-          python3 tests/integration/infinity-alternate-scope-mcp-probe.py \
-            --scope "$SCOPE" --token-file "$RUNNER_TEMP/infinity-alt-token"
+          if ! python3 tests/integration/infinity-alternate-scope-mcp-probe.py \
+            --scope "$SCOPE" --token-file "$RUNNER_TEMP/infinity-alt-token"; then
+            echo "CI shell proof failed: inspected only synthetic transient job state" >&2
+            sudo systemctl list-units --all --no-pager 'vps-agent-job-*' || true
+            sudo journalctl --no-pager --lines=60 -u 'vps-agent-job-*' --output=short || true
+            exit 1
+          fi
           sudo test ! -e /opt/alt-scope-escape
           sudo test ! -e /etc/portico-e2e-escape
           cd /srv/portico-infinity
