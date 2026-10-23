@@ -34,6 +34,11 @@ jobs:
           bash -n tests/integration/infinity-qemu-oauth-guest-setup.sh
           python3 -m py_compile tests/integration/infinity-kernel-stack-probe.py
           grep -q 'ZITADEL/Postgres' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          grep -Fq 'VPS_AGENT_INTEGRATED_INTROSPECTION_URL=https://127.0.0.1:18443' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -Fq 'SSL_CERT_FILE=$TLS/ca.pem' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -Fq 'openssl req -x509' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -Fq -- '--cacert "$TLS/ca.pem"' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          ! grep -Fq 'VPS_AGENT_INTEGRATED_INTROSPECTION_URL=http://' tests/integration/infinity-qemu-oauth-guest-setup.sh
           grep -q 'system_reset' scripts/infinity-qemu-oauth-kernel-reboot.sh
       - name: Boot, authenticate, reboot and reauthenticate in SAME guest kernel
         shell: bash
