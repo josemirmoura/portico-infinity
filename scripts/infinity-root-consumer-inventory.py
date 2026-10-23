@@ -88,6 +88,10 @@ def show_unit(name: str) -> dict[str, str]:
         # multiple commands. Never discard earlier values: all references
         # must remain visible to the detection logic.
         if key in data:
+            if key not in {"ExecStart", "ExecStartPre", "ExecStartPost",
+                           "ExecCondition", "ExecReload", "ExecStop", "ExecStopPost",
+                           "EnvironmentFiles", "DropInPaths"}:
+                raise InventoryIncomplete("duplicate security-critical systemd identity property")
             data[key] += ";" + value
         else:
             data[key] = value
