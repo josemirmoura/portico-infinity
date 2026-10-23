@@ -1,0 +1,96 @@
+name: infinity-root-consumer-inventory-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-root-consumer-inventory.py'
+      - 'tests/test_infinity_root_consumer_inventory.py'
+      - '.github/workflows/infinity-root-consumer-inventory-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  identify-privileged-consumers:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify isolated runner and unit regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]]
+          test ! -e /srv/portico-infinity
+          python3 -m py_compile scripts/infinity-root-consumer-inventory.py \
+            tests/test_infinity_root_consumer_inventory.py
+          python3 -m unittest discover -s tests -p test_infinity_root_consumer_inventory.py -v
+      - name: Detect real root unit consuming a synthetic scope script without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]]
+          SCOPE="/opt/portico-root-inventory-ci-$GITHUB_RUN_ID"
+          UNIT="portico-root-inventory-ci-$GITHUB_RUN_ID"
+          [[ "$UNIT" =~ ^portico-root-inventory-ci-[0-9]{1,24}$ ]]
+          test ! -e "$SCOPE"
+          sudo install -d -m 0755 -o root -g root "$SCOPE"
+          cleanup() {
+            test "$RUNNER_ENVIRONMENT" = github-hosted || return 1
+            [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]] || return 1
+            sudo systemctl stop "$UNIT.service" >/dev/null 2>&1 || true
+            sudo systemctl reset-failed "$UNIT.service" >/dev/null 2>&1 || true
+            if [ -d "$SCOPE" ] && [ ! -L "$SCOPE" ]; then
+              sudo rm -f -- "$SCOPE/harmless.sh"
+              sudo rmdir -- "$SCOPE"
+            fi
+          }
+          trap cleanup EXIT
+          printf '#!/bin/sh\nexit 0\n' | sudo tee "$SCOPE/harmless.sh" >/dev/null
+          sudo chmod 0755 "$SCOPE/harmless.sh"
+          sudo systemd-run --unit="$UNIT" --no-block --quiet \
+            --description="Disposable synthetic root consumer CI" \
+            --working-directory="$SCOPE" \
+            --property=Type=oneshot \
+            --property=RemainAfterExit=yes \
+            -- /bin/sh "$SCOPE/harmless.sh"
+          for _ in $(seq 1 35); do
+            if [ "$(systemctl show "$UNIT.service" -p SubState --value)" = exited ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(systemctl show "$UNIT.service" -p SubState --value)" = exited
+          if ! python3 scripts/infinity-root-consumer-inventory.py --scope /opt \
+            > "$RUNNER_TEMP/root-consumer-inventory.json"; then
+            echo "read-only inventory incomplete; sanitized error:" >&2
+            cat "$RUNNER_TEMP/root-consumer-inventory.json" >&2
+            exit 1
+          fi
+          if python3 scripts/infinity-root-consumer-inventory.py --scope /opt --strict \
+            > "$RUNNER_TEMP/root-consumer-inventory-strict.json"; then
+            echo "strict audit failed to block known synthetic root consumer" >&2
+            exit 1
+          else
+            test "$?" -eq 3
+          fi
+          python3 - "$RUNNER_TEMP/root-consumer-inventory.json" "$UNIT.service" <<'PY'
+          import json,sys
+          doc=json.load(open(sys.argv[1]))
+          assert doc["status"]=="review_required", doc["status"]
+          unit,= [r for r in doc["findings"] if r["unit"]==sys.argv[2]]
+          assert unit["classification"]=="root_consumer_review",unit
+          assert {"ExecStart","WorkingDirectory"}.issubset(set(unit["referencing_fields"])),unit
+          assert doc["root_consumer_count"]>=1
+          serialized=json.dumps(doc)
+          assert "harmless.sh" not in serialized, "report must not contain argv content"
+          print("INFINITY_ROOT_CONSUMER_REAL_SYSTEMD_DISPOSABLE_DETECTION: PASS")
+          PY
+          echo "INFINITY_ROOT_CONSUMER_STRICT_GATE_DENIED_AND_NO_HOST_MUTATION: PASS"
