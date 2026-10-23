@@ -37,6 +37,28 @@ func TestBuildSystemdRunArgsBlockedNetwork(t *testing.T) {
 	}
 }
 
+func TestBuildSystemdRunArgsPreservesExitStatus(t *testing.T) {
+    args, err := BuildSystemdRunArgs(Spec{
+        Unit: "shell-terminal-proof", User: "vps-agent-exec", Command: "true",
+        CWD: "/opt/workspace", Runtime: 9 * time.Second,
+        NetworkMode: "blocked",
+    })
+    if err != nil { t.Fatal(err) }
+    for _, expected := range []string{
+        "--no-block",
+        "--property=Type=oneshot",
+        "--property=RemainAfterExit=yes",
+        "--property=TimeoutStartSec=10",
+    } {
+        if !slices.Contains(args, expected) {
+            t.Fatalf("missing %q from %v", expected, args)
+        }
+    }
+    if slices.Contains(args, "--collect") {
+        t.Fatal("collected transient units lose terminal exit evidence before broker reconciliation")
+    }
+}
+
 func TestBuildSystemdRunArgsAllowlistFailsClosed(t *testing.T) {
 	_, err := BuildSystemdRunArgs(Spec{
 		Unit: "job", Command: "true", CWD: "/tmp", NetworkMode: "allowlist",
