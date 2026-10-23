@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/sandbox"
+    "github.com/josemirmoura/mcp-vps-agent-gateway/internal/state"
 )
 
 func TestSystemdRunnerSmoke(t *testing.T) {
@@ -119,5 +120,47 @@ func TestShellSystemdTerminalStatusSmoke(t *testing.T) {
                     status, err, tc.state, tc.exit, logs)
             }
         })
+    }
+}
+
+func TestUnpolledShellReconcileRealSystemdSmoke(t *testing.T) {
+    if os.Getenv("VPS_AGENT_SYSTEMD_JOB_SMOKE") != "1" {
+        t.Skip("requires root-owned disposable systemd runner")
+    }
+    if _, err := exec.LookPath("systemd-run"); err != nil { t.Skip("systemd-run unavailable") }
+    ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+    defer cancel()
+    runner := SystemdRunner{}
+    unit := fmt.Sprintf("vps-agent-ci-janitor-%d", os.Getpid())
+    job, err := runner.Start(ctx, sandbox.Spec{
+        Unit:unit, User:"vps-agent-exec", Command:"true", CWD:"/tmp",
+        Runtime:15*time.Second, NetworkMode:"blocked", MemoryMaxBytes:64<<20, TasksMax:16,
+    })
+    if err != nil { t.Fatal(err) }
+    t.Cleanup(func() {
+        _ = exec.Command("systemctl", "stop", unit).Run()
+        _ = exec.Command("systemctl", "reset-failed", unit).Run()
+    })
+    db, err := state.Open(":memory:")
+    if err != nil { t.Fatal(err) }
+    defer db.Close()
+    if err := db.CreateJob(ctx,state.JobRecord{
+        ID:job.ID,Subject:"owner",Tool:"shell.exec",Resource:"/tmp",
+        UnitName:unit,State:"running",CreatedAt:time.Now().Add(-time.Minute),
+        Deadline:time.Now().Add(time.Minute),
+    }); err != nil { t.Fatal(err) }
+    m := &Manager{State:db, Runner:runner}
+    var found bool
+    deadline := time.Now().Add(10*time.Second)
+    for time.Now().Before(deadline) {
+        result, err := m.ReconcileShellJobs(ctx,64)
+        if err != nil { t.Fatal(err) }
+        if result.Completed > 0 { found = true; break }
+        time.Sleep(100*time.Millisecond)
+    }
+    rec, err := db.GetJob(ctx,job.ID)
+    if err != nil || !found || rec.State!="done" || rec.ExitCode==nil || *rec.ExitCode!=0 {
+        logs,_ := runner.Tail(ctx,job,20)
+        t.Fatalf("real systemd unpolled job state=%+v err=%v found=%v logs=%s",rec,err,found,logs)
     }
 }

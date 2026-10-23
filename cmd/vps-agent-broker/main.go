@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"strconv"
 	"syscall"
+	"time"
 
 	portico "github.com/josemirmoura/mcp-vps-agent-gateway"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/broker"
@@ -62,6 +63,31 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	// Only Infinity uses this resident reconciliation loop. Legacy Community
+	// jobs retain their prior lifecycle. All systemd units are selected from
+	// the protected SQLite job ledger, never from untrusted MCP arguments.
+	if os.Getenv("VPS_AGENT_INFINITY_PROTECTED_ROOT") != "" {
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					probe, done := context.WithTimeout(ctx, 25*time.Second)
+					result, err := b.Jobs.ReconcileShellJobs(probe, 64)
+					done()
+					if err != nil {
+						slog.Warn("shell_job_reconcile_failed", "error", err)
+					} else if result.Completed > 0 || result.RequiresOperator > 0 {
+						slog.Info("shell_job_reconcile", "inspected", result.Inspected,
+							"completed", result.Completed, "requires_operator", result.RequiresOperator)
+					}
+				}
+			}
+		}()
+	}
 	slog.Info("broker_start", "product_version", portico.Version(), "socket", socket, "instance_id", b.InstanceID, "instance_name", b.InstanceName, "policy", policyFile)
 	// Isolate web approvals on a distinct Unix socket and dedicated volume.
 	operatorSocket := os.Getenv("VPS_AGENT_OPERATOR_APPROVAL_SOCKET")
