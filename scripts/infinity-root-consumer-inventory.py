@@ -17,7 +17,7 @@ import sys
 
 UNIT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.@:+\\-]{0,245}\.service$")
 FIELDS = (
-    "Id", "LoadState", "User", "DynamicUser",
+    "Id", "LoadState", "ActiveState", "User", "DynamicUser",
     "ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop",
     "ExecStopPost", "WorkingDirectory", "EnvironmentFiles", "FragmentPath",
     "DropInPaths", "RootDirectory", "RootImage",
@@ -83,16 +83,25 @@ def show_unit(name: str) -> dict[str, str]:
         if not sep or key not in FIELDS or key in data:
             raise InventoryIncomplete("unrecognized or duplicate systemd property")
         data[key] = value
-    if data.get("Id") != name or data.get("LoadState") not in ("loaded", "masked"):
-        raise InventoryIncomplete("unit identity or load state could not be verified: " +
-                                  "id_match=" + str(data.get("Id") == name) +
-                                  ", load_state=" + data.get("LoadState", "<missing>")[:32])
+    if data.get("Id") != name:
+        raise InventoryIncomplete("unit identity changed between list and show")
+    load, active = data.get("LoadState"), data.get("ActiveState")
+    # --all includes inactive D-Bus/autostart dependencies that are not
+    # installed on some Ubuntu runners. A missing AND inactive service is
+    # incapable of consuming workspace files now, but it is counted separately
+    # and is not a verified loaded service. Active/unknown missing units fail.
+    if load in ("not-found", "masked") and active == "inactive":
+        return {"Id": name, "LoadState": load, "ActiveState": active}
+    if load != "loaded" or not active:
+        raise InventoryIncomplete("service unavailable or uncertain: load_state=" +
+                                  (load or "<missing>")[:32] + ", active_state=" +
+                                  (active or "<missing>")[:32])
     # systemctl show omits optional properties that have no value at all,
     # e.g. an unset ExecStartPre or EnvironmentFiles. Omission of these
     # optional values is NOT the same as an uninspectable service. Fail
     # closed when the identity, load status, execution or user identity is
     # absent; treat only optional properties as empty.
-    required = {"Id", "LoadState", "User", "DynamicUser", "ExecStart"}
+    required = {"Id", "LoadState", "ActiveState", "User", "DynamicUser", "ExecStart"}
     missing = sorted(required.difference(data))
     if missing:
         raise InventoryIncomplete("systemd omitted required property names: " + ",".join(missing))
@@ -112,6 +121,8 @@ def scope_reference(raw: str, scope: str) -> bool:
 def inspect_unit(name: str, data: dict[str, str], scope: str) -> dict | None:
     if data.get("Id") != name:
         raise InventoryIncomplete("service identity changed while inspecting")
+    if data.get("LoadState") in ("not-found", "masked") and data.get("ActiveState") == "inactive":
+        return None
     referenced = sorted(k for k in CONSUMER_FIELDS if scope_reference(data.get(k, ""), scope))
     if not referenced:
         return None
@@ -141,9 +152,12 @@ def inventory(scope: str) -> dict:
     scope = canonical_scope(scope)
     units = list_units()
     findings: list[dict] = []
+    unloaded = 0
     for name in units:
         try:
             data = show_unit(name)
+            if data.get("LoadState") in ("not-found", "masked"):
+                unloaded += 1
             entry = inspect_unit(name, data, scope)
         except InventoryIncomplete as exc:
             raise InventoryIncomplete("cannot fully inspect service " + name + ": " + str(exc)) from exc
@@ -153,7 +167,8 @@ def inventory(scope: str) -> dict:
     return {
         "status": "review_required" if root_count else "no_direct_root_references_detected",
         "scope": scope,
-        "systemd_services_inspected": len(units),
+        "systemd_services_inspected": len(units) - unloaded,
+        "inactive_unloaded_services": unloaded,
         "root_consumer_count": root_count,
         "findings": findings,
         "limitations": LIMITATIONS,
