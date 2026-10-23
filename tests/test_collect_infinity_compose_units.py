@@ -10,6 +10,8 @@ import unittest
 from unittest import mock
 import json
 import os
+import types
+import sys
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "collect-infinity-compose-units.py"
 spec = importlib.util.spec_from_file_location("compose_retention", SCRIPT)
@@ -157,6 +159,27 @@ class ComposeRetentionTests(unittest.TestCase):
             self.assertEqual(data["log_bytes"], archive.stat().st_size)
             with self.assertRaises(ret.UnsafeJob):
                 ret.archive_job(folder, job, self.unit())
+
+    def test_apply_requires_matching_hostname_and_root_ack(self):
+        with mock.patch.object(ret.os, "geteuid", return_value=0), \
+             mock.patch.object(ret.os, "uname",
+                               return_value=types.SimpleNamespace(nodename="lab-worker.example.invalid")), \
+             mock.patch.object(ret, "candidates", return_value=[]):
+            for argv in (
+                ["retention", "--apply", "--ack-operator-cleanup"],
+                ["retention", "--apply", "--ack-operator-cleanup",
+                 "--expected-hostname", "srv-ia"],
+            ):
+                with self.subTest(argv=argv), \
+                     mock.patch.object(sys, "argv", argv), \
+                     self.assertRaises(SystemExit) as cm:
+                    ret.main()
+                self.assertEqual(cm.exception.code, 2)
+            with mock.patch.object(sys, "argv", [
+                "retention", "--apply", "--ack-operator-cleanup",
+                "--expected-hostname", "lab-worker"
+            ]):
+                self.assertEqual(ret.main(), 0)
 
     def test_archive_outside_opt_and_root_checks(self):
         with self.assertRaises(ret.UnsafeJob):

@@ -1,0 +1,44 @@
+name: infinity-compose-retention-real-systemd-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/collect-infinity-compose-units.py'
+      - 'tests/test_collect_infinity_compose_units.py'
+      - 'tests/integration/infinity-compose-retention-systemd-e2e.py'
+      - '.github/workflows/infinity-compose-retention-real-systemd-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  finished-unit-archive-and-collect:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail-closed ephemeral runner and Python unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]]
+          test ! -e /srv/portico-infinity
+          python3 -m py_compile scripts/collect-infinity-compose-units.py \
+            tests/integration/infinity-compose-retention-systemd-e2e.py
+          python3 -m unittest discover -s tests -p test_collect_infinity_compose_units.py -v
+      - name: Real systemd oneshot and SQLite archival on disposable host only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          sudo env RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            python3 tests/integration/infinity-compose-retention-systemd-e2e.py
