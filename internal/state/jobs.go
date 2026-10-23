@@ -56,6 +56,21 @@ func (s *Store) UpdateJobState(ctx context.Context, id, stateName, detail string
 	return nil
 }
 
+
+// UpdateActiveJobState transitions only nonterminal in-flight records. A
+// concurrent status poll, janitor or cancellation must never overwrite a
+// previously persisted terminal or reconciliation-required checkpoint.
+func (s *Store) UpdateActiveJobState(ctx context.Context, id, stateName, detail string, exitCode *int) (bool, error) {
+    result, err := s.db.ExecContext(ctx,
+        `UPDATE jobs SET state=?, detail=?, exit_code=?, updated_at=? WHERE job_id=?
+          AND state IN ('starting','running','active','activating','reloading','deactivating','cancelling')`,
+        stateName, detail, exitCode, time.Now().UnixNano(), id)
+    if err != nil { return false, err }
+    affected, err := result.RowsAffected()
+    if err != nil { return false, err }
+    return affected == 1, nil
+}
+
 func (s *Store) GetJob(ctx context.Context, id string) (JobRecord, error) {
 	var j JobRecord
 	var deadline, created, updated int64
