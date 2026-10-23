@@ -171,8 +171,17 @@ func (m *Manager) Cancel(ctx context.Context, subject, id string) error {
 	if rec.Subject != subject {
 		return errors.New("job belongs to another subject")
 	}
+	if rec.State == "done" || rec.State == "failed" || rec.State == "cancelled" ||
+		rec.State == "reconcile_required" {
+		return errors.New("job_already_terminal: refusing cancellation of a terminal or unresolved job")
+	}
 	if err := m.Runner.Cancel(ctx, Job{ID: rec.ID, Unit: rec.UnitName, State: rec.State, Deadline: rec.Deadline}); err != nil {
 		return err
 	}
-	return m.State.UpdateJobState(ctx, rec.ID, "cancelled", "cancelled by request", nil)
+	changed, err := m.State.UpdateActiveJobState(ctx, rec.ID, "cancelled", "cancelled by request", nil)
+	if err != nil { return err }
+	if !changed {
+		return errors.New("reconcile_required: job changed state concurrently with cancellation")
+	}
+	return nil
 }
