@@ -80,9 +80,17 @@ def show_unit(name: str) -> dict[str, str]:
     data: dict[str, str] = {}
     for row in output.splitlines():
         key, sep, value = row.partition("=")
-        if not sep or key not in FIELDS or key in data:
-            raise InventoryIncomplete("unrecognized or duplicate systemd property")
-        data[key] = value
+        if not sep:
+            raise InventoryIncomplete("systemd returned a line without a property delimiter")
+        if key not in FIELDS:
+            raise InventoryIncomplete("unexpected systemd property name: " + key[:48])
+        # ExecStart / ExecStartPre and related fields may be repeated for
+        # multiple commands. Never discard earlier values: all references
+        # must remain visible to the detection logic.
+        if key in data:
+            data[key] += ";" + value
+        else:
+            data[key] = value
     if data.get("Id") != name:
         raise InventoryIncomplete("unit identity changed between list and show")
     load, active = data.get("LoadState"), data.get("ActiveState")
