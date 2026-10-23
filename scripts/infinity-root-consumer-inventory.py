@@ -85,8 +85,9 @@ def show_unit(name: str) -> dict[str, str]:
         data[key] = value
     if data.get("Id") != name or data.get("LoadState") not in ("loaded", "masked"):
         raise InventoryIncomplete("unit identity or load state could not be verified")
-    if any(k not in data for k in FIELDS):
-        raise InventoryIncomplete("unit properties missing; inventory incomplete")
+    missing = sorted(k for k in FIELDS if k not in data)
+    if missing:
+        raise InventoryIncomplete("systemd omitted requested property names: " + ",".join(missing))
     return data
 
 
