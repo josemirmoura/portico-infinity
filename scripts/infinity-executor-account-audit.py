@@ -44,11 +44,14 @@ def extract_run_as(policy: str) -> str:
         if "\t" in raw or len(raw)>4096:
             raise AccountAuditBlocked("policy contains ambiguous indentation or oversized row")
         if not raw.startswith(" "):
-            matched=re.fullmatch(r"([a-zA-Z_][a-zA-Z_0-9-]*):(?:\s*(?:#.*)?)?",raw)
+            matched=re.fullmatch(r"([a-zA-Z_][a-zA-Z_0-9-]*):(?: +[^#]+)?(?: +#.*)?",raw)
             if matched is None:
                 raise AccountAuditBlocked("unsupported top-level policy syntax")
             section=matched.group(1)
-            if section=="shell":shell_sections+=1
+            if section=="shell":
+                if raw.strip() != "shell:":
+                    raise AccountAuditBlocked("shell mapping is not a plain block")
+                shell_sections+=1
             continue
         if section=="shell" and re.match(r"^  run_as\s*:",raw):
             matched=re.fullmatch(r"  run_as: ([a-z_][a-z0-9_-]{0,31}\$?)\s*",raw)
