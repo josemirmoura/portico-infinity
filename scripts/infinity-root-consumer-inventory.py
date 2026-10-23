@@ -18,7 +18,7 @@ import sys
 UNIT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.@:+\\-]{0,245}\.service$")
 FIELDS = (
     "Id", "LoadState", "ActiveState", "User", "DynamicUser",
-    "ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop",
+    "ExecStart", "ExecStartPre", "ExecStartPost", "ExecCondition", "ExecReload", "ExecStop",
     "ExecStopPost", "WorkingDirectory", "EnvironmentFiles", "FragmentPath",
     "DropInPaths", "RootDirectory", "RootImage",
 )
@@ -101,7 +101,9 @@ def show_unit(name: str) -> dict[str, str]:
     # optional values is NOT the same as an uninspectable service. Fail
     # closed when the identity, load status, execution or user identity is
     # absent; treat only optional properties as empty.
-    required = {"Id", "LoadState", "ActiveState", "User", "DynamicUser", "ExecStart"}
+    # Some loaded oneshot/generated services expose no ExecStart at all.
+    # Include every declared Exec* hook, but an unset ExecStart is empty.
+    required = {"Id", "LoadState", "ActiveState", "User", "DynamicUser"}
     missing = sorted(required.difference(data))
     if missing:
         raise InventoryIncomplete("systemd omitted required property names: " + ",".join(missing))
