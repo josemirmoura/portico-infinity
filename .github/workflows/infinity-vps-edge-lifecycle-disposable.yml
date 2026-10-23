@@ -58,6 +58,10 @@ jobs:
           for name in compose.yaml infinity-upstreams.yml infinity-edge-lifecycle.py; do
             sudo install -o root -g root -m 0644 "deploy/infinity-vps-edge/$name" "$root/$name"
           done
+          # Detect unexpected hosted-runner base permissions, without
+          # disclosing config, domain, tokens or private Docker mounts.
+          stat -c '%a %u:%g %n' / /opt "$root" "$root/compose.yaml" \
+            "$root/infinity-upstreams.yml" "$root/infinity-edge-lifecycle.py"
           before="$(sudo sha256sum "$root/compose.yaml" "$root/infinity-upstreams.yml")"
           docker network create traefik-public >/dev/null
           docker run -d --name foreign-edge-traefik-parent \
