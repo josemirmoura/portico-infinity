@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Operator-only, fail-closed retention for finished Pórtico Compose transient units.
 
-Dry-run by default. Does not run from MCP or as the AI shell identity.
+Dry-run by default. Apply requires root, explicit operator acknowledgement and\nan exact target-hostname match. Never runs from MCP or as the AI shell identity.
 Archives bounded logs and systemd/SQLite terminal evidence OUTSIDE /opt before
 releasing a completed unit. Does not change the job database or audit history.
 """
@@ -190,13 +190,16 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--ack-operator-cleanup", action="store_true")
+    ap.add_argument("--expected-hostname", default="", help="required on --apply; exact short hostname of the authorized Linux host")
     args = ap.parse_args()
     if args.retention_days < 1 or args.limit < 1 or args.limit > 100:
         ap.error("retention-days >= 1, limit between 1 and 100")
     if args.apply and (os.geteuid() != 0 or not args.ack_operator_cleanup):
         ap.error("apply requires root console and --ack-operator-cleanup")
-    if args.apply and os.uname().nodename.split(".")[0] != "srv-ia":
-        ap.error("apply only allowed on srv-ia")
+    if args.apply:
+        actual_hostname = os.uname().nodename.split(".")[0]
+        if not args.expected_hostname or args.expected_hostname != actual_hostname:
+            ap.error("--apply requires --expected-hostname exactly matching this host")
     try:
         rows = candidates(args.state_db, args.retention_days, args.limit)
         examined = eligible = cleaned = 0
