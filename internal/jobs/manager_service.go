@@ -71,13 +71,43 @@ func (m *Manager) Status(ctx context.Context, subject, id string) (state.JobReco
 	if rec.State == "done" || rec.State == "failed" || rec.State == "cancelled" {
 		return rec, nil
 	}
-	status, err := m.Runner.Status(ctx, Job{ID: rec.ID, Unit: rec.UnitName, State: rec.State, Deadline: rec.Deadline})
+	job := Job{ID: rec.ID, Unit: rec.UnitName, State: rec.State, Deadline: rec.Deadline}
+	if runner, ok := m.Runner.(DetailedStatusRunner); ok {
+		terminal, statusErr := runner.DetailedStatus(ctx, job)
+		if statusErr != nil {
+			// Do not mutate the durable checkpoint when the unit disappears
+			// after a crash or its final state cannot be verified.
+			return rec, fmt.Errorf("reconcile_required: %w", statusErr)
+		}
+		if terminal.State == "" {
+			return rec, errors.New("reconcile_required: shell job missing a trustworthy state")
+		}
+		if terminal.State != rec.State || terminal.ExitCode != nil || terminal.Detail != "" {
+			if err := m.State.UpdateJobState(ctx, rec.ID, terminal.State, terminal.Detail, terminal.ExitCode); err != nil {
+				return rec, fmt.Errorf("reconcile_required: cannot persist shell job terminal status: %w", err)
+			}
+			rec, statusErr = m.State.GetJob(ctx, rec.ID)
+			if statusErr != nil {
+				return rec, statusErr
+			}
+			if rec.State == "done" || rec.State == "failed" {
+				if collector, ok := m.Runner.(TerminalCollector); ok {
+					collector.CollectFinished(ctx, job)
+				}
+			}
+		}
+		return rec, nil
+	}
+	// Other test runners and legacy adapters retain the existing interface.
+	status, err := m.Runner.Status(ctx, job)
 	if err != nil {
 		return rec, err
 	}
 	if status != "" && status != rec.State {
-		rec.State = status
-		_ = m.State.UpdateJobState(ctx, rec.ID, status, "", nil)
+		if err := m.State.UpdateJobState(ctx, rec.ID, status, "", nil); err != nil {
+			return rec, err
+		}
+		return m.State.GetJob(ctx, rec.ID)
 	}
 	return rec, nil
 }
