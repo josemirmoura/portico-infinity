@@ -15,7 +15,9 @@ Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/
 - [PR #28](https://github.com/josemirmoura/portico-infinity/pull/28), [E2E de arquivo >2 GiB](https://github.com/josemirmoura/portico-infinity/actions/runs/39825831727), merge `5c4da681903512cd747d9ba328da14ae0def0bfe`: SHA em origem/destino, bytes/progresso, cancelamento após 128 MiB, replay negado.
 - [PR #30](https://github.com/josemirmoura/portico-infinity/pull/30), [E2E systemd real](https://github.com/josemirmoura/portico-infinity/actions/runs/39835994798), merge `07e401d8092782d917f055fea150c1a011e763f4`: cópia de 128 MiB através de unidade systemd, rejeição de `.env`, cancelamento de uma fonte esparsa de 8 GiB e bloqueio de reexecução.
 - [PR #31](https://github.com/josemirmoura/portico-infinity/pull/31), [E2E Docker + MCP + systemd](https://github.com/josemirmoura/portico-infinity/actions/runs/39837703649), merge `7a118efbc5c046cf834bedab142bd376efe167b1`: cliente MCP com **bearer estático de laboratório** → Gateway → Broker → systemd host → worker. Cópia de 128 MiB, SHA, `job.status`, idempotência, recusa fora do teto e cadeia de auditoria; **17/17 checks CI** no SHA `5b48523351587efcf297aa7633b6fe2f352e1c33`.
-- **Limite das provas acima:** dados sintéticos e hosts descartáveis; OAuth real foi comprovado em workflow independente e ainda não combinado com o worker em um único ensaio. Reinício de host, revogação de jobs ativos, recuperação/reconciliação e UAT do proprietário permanecem obrigatórios.
+- [PR #38](https://github.com/josemirmoura/portico-infinity/pull/38), [E2E de fence externo](https://github.com/josemirmoura/portico-infinity/actions/runs/39871198739): operador persiste bloqueio por sujeito, para apenas unidades tipadas e reconcilia checkpoint root-only.
+- [PR #40](https://github.com/josemirmoura/portico-infinity/pull/40), [E2E OAuth + worker ativo](https://github.com/josemirmoura/portico-infinity/actions/runs/39874940886), merge `8897f86d38cf06e8d10418e20a329da9d5c0d344`: **8/8 workflows verdes** no SHA `315b7985`. A mesma conta sintética do ZITADEL autentica `file.copy.start` via MCP, produz unidade `systemd` ativa, recebe fence externo com `cancelled` durável e destino ausente; nova cópia negada, usuário desativado fora do MCP, bearer antigo retorna HTTP 401.
+- **Limite das provas:** hosts e dados sintéticos descartáveis. O ensaio conjunto **já foi aprovado** para bearer de conta de serviço, mas não cobre sessões humanas, refresh tokens, reboot físico, efeitos indiretos root e UAT pessoal.
 
 ## Domínios de confiança
 
@@ -31,7 +33,7 @@ Caminhos relativos, escapes, diretórios críticos (incluindo `/srv`, `/etc`, `/
 
 O controlador `/srv` e o executável host fora do teto selecionado **não são modificáveis pelo MCP**. O worker recebe acesso de leitura/escrita apenas ao teto fixado pelo operador para aquela instalação. Ele recusa caminhos fora do escopo, traversal, symlinks, hardlinks, `.env*`, origem=destino e cota inexistente/superior a 1 TiB.
 
-## Revogação externa de cópias longas (implementação candidata, sujeita a CI)
+## Revogação externa de cópias longas (CI descartável comprovado)
 
 A desativação de um usuário no ZITADEL bloqueia novas solicitações OAuth, mas **não cancela automaticamente** um worker `systemd` despachado antes da revogação. O fluxo técnico acrescenta um *fence persistente* por sujeito, criado pelo operador fora do MCP, e cancelamento tipado dos jobs daquele sujeito.
 
@@ -49,7 +51,7 @@ sudo python3 scripts/infinity-revoke-filecopy-subject.py --subject 'SUJEITO-OAUT
 sudo python3 scripts/infinity-revoke-filecopy-subject.py --subject 'SUJEITO-OAUTH-EXATO' --revoke --confirm REVOKE-INFINITY-FILECOPY-SUBJECT
 ```
 
-**Limites do gate atual:** sem prova, por esta alteração isolada, de revogação interativa/refresh tokens no ZITADEL real, reboot de host ou cancelamento de um worker de produção. Exigir CI positivo/negativo no SHA, E2E OAuth + cópia longa combinado em runner isolado, e UAT antes de considerar o requisito integral concluído.
+**Limites do gate atual:** o ensaio OAuth real + cópia longa no mesmo runner **foi aprovado na PR #40** com token de conta sintética. Ainda falta testar revogação de sessões humanas e refresh tokens, reboot de host e cancelamento em instalação operacional autorizada. Sem UAT e decisão expressa do proprietário não existe aceite v1.0.
 
 ## Ciclo do job
 
