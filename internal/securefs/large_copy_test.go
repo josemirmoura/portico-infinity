@@ -110,3 +110,47 @@ func TestBinaryStreamSourcePathSwapDuringFinalProgressNeverPublishes(t *testing.
         })
     }
 }
+
+
+func TestBinaryStreamPreCommitFenceFailClosed(t *testing.T) {
+    for _, tc := range []struct { name string; deny error }{
+        {"revoked", context.Canceled},
+        {"fence-unavailable", errors.New("operator fence unavailable")},
+    } {
+        t.Run(tc.name, func(t *testing.T) {
+            root := t.TempDir()
+            m, err := New([]string{root}, []string{root}, DefaultMaxBytes)
+            if err != nil { t.Fatal(err) }
+            src, dst := filepath.Join(root, "source.gguf"), filepath.Join(root, "published.gguf")
+            if err := os.WriteFile(src, bytes.Repeat([]byte("z"), 2<<20), 0600); err != nil { t.Fatal(err) }
+            progressReachedEnd := false
+            fenceCalled := 0
+            _, err = m.CopyFileStreamWithPreCommitFence(context.Background(), src, dst, 3<<20, "",
+                func(done, total int64) error {
+                    if done == total { progressReachedEnd = true }
+                    return nil
+                }, func() error {
+                    fenceCalled++
+                    if !progressReachedEnd { return errors.New("fence invoked before final copy chunk") }
+                    return tc.deny
+                })
+            if !errors.Is(err, tc.deny) { t.Fatalf("pre-publication fence not enforced: %v", err) }
+            if fenceCalled != 1 { t.Fatalf("fence call count = %d", fenceCalled) }
+            if _, statErr := os.Stat(dst); !errors.Is(statErr, os.ErrNotExist) {
+                t.Fatalf("destination published despite denied fence: %v", statErr)
+            }
+            temps, err := filepath.Glob(filepath.Join(root, ".published.gguf.binary-copy-*"))
+            if err != nil { t.Fatal(err) }
+            if len(temps) != 0 { t.Fatalf("leftover unpublished temp files: %v", temps) }
+        })
+    }
+}
+
+func TestBinaryStreamPreCommitFenceMustBeProvided(t *testing.T) {
+    root := t.TempDir()
+    m, err := New([]string{root}, []string{root}, DefaultMaxBytes)
+    if err != nil { t.Fatal(err) }
+    _, err = m.CopyFileStreamWithPreCommitFence(context.Background(),
+        filepath.Join(root, "source"), filepath.Join(root, "dst"), 1<<20, "", nil, nil)
+    if err == nil { t.Fatal("nil revocation fence accepted") }
+}

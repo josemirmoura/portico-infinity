@@ -37,6 +37,28 @@ func (m *Manager) CopyFileStream(
 	ctx context.Context, src, dst string, maxBytes int64,
 	expectedSHA256 string, progress func(done, total int64) error,
 ) (string, error) {
+	return m.copyFileStream(ctx, src, dst, maxBytes, expectedSHA256, progress, nil)
+}
+
+// CopyFileStreamWithPreCommitFence checks an operator-controlled revocation
+// fence immediately before atomic destination publication. This callback
+// must be independent of MCP input and fail closed if identity state is
+// unavailable. A fence cannot make an external revocation and rename
+// mathematically atomic, so the operator must still stop active jobs.
+func (m *Manager) CopyFileStreamWithPreCommitFence(
+	ctx context.Context, src, dst string, maxBytes int64,
+	expectedSHA256 string, progress func(done, total int64) error,
+	preCommitFence func() error,
+) (string, error) {
+	if preCommitFence == nil { return "", errors.New("pre-commit fence must not be nil") }
+	return m.copyFileStream(ctx, src, dst, maxBytes, expectedSHA256, progress, preCommitFence)
+}
+
+func (m *Manager) copyFileStream(
+	ctx context.Context, src, dst string, maxBytes int64,
+	expectedSHA256 string, progress func(done, total int64) error,
+	preCommitFence func() error,
+) (string, error) {
 	if ctx == nil { return "", errors.New("context is required") }
 	if maxBytes <= 0 || maxBytes > MaxBinaryCopyBytes {
 		return "", errors.New("binary copy quota is invalid")
@@ -178,6 +200,16 @@ func (m *Manager) CopyFileStream(
 	if err := out.Chmod(before.Mode().Perm()); err != nil { return "", err }
 	if err := out.Sync(); err != nil { return "", err }
 	if err := out.Close(); err != nil { return "", err }
+	// Long fsync/chown operations may run after the final progress callback.
+	// Re-check the external authorization fence at the latest practical
+	// point before publishing. An error leaves the destination unpublished.
+	if err := ctx.Err(); err != nil { return "", err }
+	if preCommitFence != nil {
+		if err := preCommitFence(); err != nil {
+			return "", fmt.Errorf("binary-copy pre-publication fence rejected: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil { return "", err }
 	// Both paths are within the same pinned parent directory descriptor.
 	if err := unix.Renameat2(parentFD, tmpBase, parentFD, base, unix.RENAME_NOREPLACE); err != nil { return "", err }
 	published = true

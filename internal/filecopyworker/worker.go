@@ -312,7 +312,7 @@ func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
     lastReport := time.Now()
     var progressErr error
     revokedDuringCopy := false
-    sha, copyErr := fs.CopyFileStream(ctx, manifest.Source, manifest.Destination,
+    sha, copyErr := fs.CopyFileStreamWithPreCommitFence(ctx, manifest.Source, manifest.Destination,
         manifest.MaxBytes, manifest.ExpectedSHA256, func(done, total int64) error {
             lastDone, lastTotal = done, total
             if progressErr != nil { return progressErr }
@@ -331,6 +331,20 @@ func runWithRevocationCheck(ctx context.Context, dir, hostRoot, id string,
             progressErr = status(dir, id, "running", done, total, "")
             if progressErr == nil { recorded, lastReport = done, time.Now() }
             return progressErr
+        }, func() error {
+            // The final chunk's callback can precede chown/fsync by an
+            // appreciable interval. Check the operator-owned fence again
+            // immediately before the filesystem's atomic rename.
+            denied, checkErr := isRevoked(dir, manifest.Subject)
+            if checkErr != nil {
+                progressErr = fmt.Errorf("pre-publication revocation check failed: %w", checkErr)
+                return progressErr
+            }
+            if denied {
+                revokedDuringCopy = true
+                return context.Canceled
+            }
+            return ctx.Err()
         })
     if progressErr != nil {
         // The destination may already have been atomically published.
