@@ -85,9 +85,17 @@ def show_unit(name: str) -> dict[str, str]:
         data[key] = value
     if data.get("Id") != name or data.get("LoadState") not in ("loaded", "masked"):
         raise InventoryIncomplete("unit identity or load state could not be verified")
-    missing = sorted(k for k in FIELDS if k not in data)
+    # systemctl show omits optional properties that have no value at all,
+    # e.g. an unset ExecStartPre or EnvironmentFiles. Omission of these
+    # optional values is NOT the same as an uninspectable service. Fail
+    # closed when the identity, load status, execution or user identity is
+    # absent; treat only optional properties as empty.
+    required = {"Id", "LoadState", "User", "DynamicUser", "ExecStart"}
+    missing = sorted(required.difference(data))
     if missing:
-        raise InventoryIncomplete("systemd omitted requested property names: " + ",".join(missing))
+        raise InventoryIncomplete("systemd omitted required property names: " + ",".join(missing))
+    for optional in set(FIELDS).difference(required):
+        data.setdefault(optional, "")
     return data
 
 
