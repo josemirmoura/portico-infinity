@@ -19,6 +19,33 @@ healthy() {
   api http://127.0.0.1:18082/.well-known/openid-configuration |
     python3 -c 'import json,sys;assert json.load(sys.stdin)["issuer"]=="https://mcp.example.invalid"'
 }
+if [ "$1" = --diagnose ]; then
+  # No secrets, token JSON, process environment or container logs ever leave
+  # this guest. Show bounded service state and listener ownership only.
+  for svc in docker nginx portico-kernel-broker portico-kernel-gateway; do
+    printf 'service=%s state=' "$svc"
+    systemctl is-active "$svc" || true
+  done
+  printf 'oauth_db_and_idp_containers:\n'
+  dc ps --all || true
+  for svc in zitadel-postgres zitadel-api; do
+    cid="$(dc ps -q "$svc" 2>/dev/null || true)"
+    if test -z "$cid"; then
+      printf 'component=%s absent\n' "$svc"
+    else
+      printf 'component=%s ' "$svc"
+      docker inspect -f 'running={{.State.Running}} status={{if .State.Health}}{{.State.Health.Status}}{{else}}no-health{{end}} restart_count={{.RestartCount}} exit_code={{.State.ExitCode}}' "$cid" || true
+    fi
+  done
+  ss -lnt '( sport = :18082 or sport = :18443 or sport = :8080 )' || true
+  printf 'guest_oauth_fixtures: '
+  test -s "$LAB/token.json" && printf 'token-present ' || printf 'token-missing '
+  test -s /home/infinity-ci/portico-oauth-token && printf 'owner-copy-present\n' || printf 'owner-copy-missing\n'
+  printf 'https_discovery_status='
+  curl -sS --cacert "$TLS/ca.pem" --connect-timeout 3 --max-time 12 -o /dev/null -w '%{http_code}\n' \
+    https://127.0.0.1:18443/.well-known/openid-configuration || true
+  exit 0
+fi
 if [ "$1" = --verify ]; then
   test -s "$LAB/token.json"
   test -s /home/infinity-ci/portico-oauth-token
