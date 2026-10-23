@@ -17,6 +17,8 @@ import subprocess
 import sys
 
 CONTROLLER = Path("/srv/portico-infinity")
+FILECOPY_STATE = CONTROLLER / "state/filecopy-jobs"
+FILECOPY_JOB = re.compile(r"vps-agent-filecopy-[0-9a-f]{32}\Z")
 PROJECT = "portico-infinity"
 SERVICES = frozenset({
     "gateway", "broker", "operator-portal",
@@ -128,11 +130,97 @@ def ensure_no_active_workers(command=run) -> None:
             raise LifecycleError("active file-copy worker: stop/reconcile it out-of-band first")
 
 
-def change_runtime(action: str, command=run) -> tuple[int, int]:
+
+def ensure_no_unreconciled_filecopy_checkpoints(directory: Path = FILECOPY_STATE) -> None:
+    """Refuse lifecycle mutations when systemd units disappeared after reboot.
+
+    A failed/stale worker can lose its transient unit and no longer appear in
+    systemctl list-units. Its root-only manifest and fsynced progress still
+    exist. Inspect bounded files with descriptor-relative O_NOFOLLOW reads.
+    """
+    try:
+        metadata = directory.lstat()
+    except FileNotFoundError:
+        return  # Fresh runtime; no durable worker has ever been dispatched.
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o077):
+        raise LifecycleError("unsafe private filecopy job directory")
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        manifests: set[str] = set()
+        statuses: dict[str, dict] = {}
+        with os.scandir(fd) as items:
+            for item in items:
+                name = item.name
+                if not name.startswith("vps-agent-filecopy-"):
+                    # Operator revocation markers are independent read-only
+                    # authorization fences, not worker progress records.
+                    if name.startswith("revoked-subject-"):
+                        continue
+                    raise LifecycleError("unrecognized private filecopy state entry")
+                if name.endswith(".lock"):
+                    stem = name[:-len(".lock")]
+                    role = "lock"
+                elif name.endswith(".request.json"):
+                    stem = name[:-len(".request.json")]
+                    role = "manifest"
+                elif name.endswith(".progress.json"):
+                    stem = name[:-len(".progress.json")]
+                    role = "progress"
+                else:
+                    raise LifecycleError("unknown filecopy checkpoint suffix: operator reconciliation required")
+                if not FILECOPY_JOB.fullmatch(stem):
+                    raise LifecycleError("invalid filecopy checkpoint job identity")
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                        or info.st_nlink != 1 or info.st_mode & 0o077):
+                    raise LifecycleError("unsafe filecopy checkpoint metadata")
+                if role == "lock":
+                    continue
+                if info.st_size > 4096:
+                    raise LifecycleError("unbounded filecopy checkpoint record")
+                handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+                try:
+                    data = os.read(handle, 4097)
+                finally:
+                    os.close(handle)
+                if len(data) > 4096:
+                    raise LifecycleError("oversized filecopy checkpoint payload")
+                try:
+                    record = json.loads(data)
+                except (TypeError, ValueError) as exc:
+                    raise LifecycleError("corrupt filecopy checkpoint: operator reconciliation required") from exc
+                if not isinstance(record, dict) or record.get("job_id") != stem:
+                    raise LifecycleError("filecopy checkpoint subject/job mismatch")
+                if role == "manifest":
+                    manifests.add(stem)
+                else:
+                    statuses[stem] = record
+        if manifests != set(statuses):
+            raise LifecycleError("filecopy job missing manifest/progress: operator reconciliation required")
+        for ident, record in statuses.items():
+            phase = record.get("phase")
+            if phase not in ("done", "cancelled", "failed"):
+                raise LifecycleError("unreconciled filecopy job: " + ident + " (" + str(phase) + ")")
+            if phase == "done":
+                sha = record.get("sha256")
+                done, total = record.get("bytes_done"), record.get("bytes_total")
+                if (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
+                        or not isinstance(done, int) or isinstance(done, bool)
+                        or not isinstance(total, int) or isinstance(total, bool)
+                        or done < 0 or done != total):
+                    raise LifecycleError("invalid terminal filecopy integrity checkpoint")
+    finally:
+        os.close(fd)
+
+
+def change_runtime(action: str, command=run, *, filecopy_state: Path = FILECOPY_STATE) -> tuple[int, int]:
     # All safety checks complete before the first mutation.
     containers, networks, volumes = inventory(command)
     ensure_no_active_workers(command)
+    ensure_no_unreconciled_filecopy_checkpoints(filecopy_state)
     ensure_no_active_workers(command)
+    ensure_no_unreconciled_filecopy_checkpoints(filecopy_state)
     if inventory(command) != (containers, networks, volumes):
         raise LifecycleError("runtime inventory changed during preflight")
     for item in containers:

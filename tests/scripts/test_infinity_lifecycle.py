@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -101,6 +103,92 @@ class FakeHost:
 
 
 class InfinityLifecycleTests(unittest.TestCase):
+    def new_filecopy_fixture(self, directory, phase="running", include_progress=True):
+        state = Path(directory) / "filecopy-jobs"
+        state.mkdir(mode=0o700)
+        ident = "vps-agent-filecopy-" + ("a" * 32)
+        manifest = {"job_id": ident, "subject": "synthetic-operator",
+                    "source": "/opt/a.gguf", "destination": "/opt/b.gguf",
+                    "scope_root": "/opt", "max_bytes": 536870912}
+        request = state / (ident + ".request.json")
+        request.write_text(json.dumps(manifest), encoding="utf-8")
+        request.chmod(0o600)
+        if include_progress:
+            progress = {"job_id": ident, "phase": phase,
+                        "bytes_done": 67108864, "bytes_total": 536870912}
+            if phase == "done":
+                progress.update({"bytes_done": 536870912,
+                                 "sha256": "a" * 64})
+            checkpoint = state / (ident + ".progress.json")
+            checkpoint.write_text(json.dumps(progress), encoding="utf-8")
+            checkpoint.chmod(0o600)
+        return state, ident
+
+    def test_host_reboot_vanished_unit_with_running_progress_blocks_lifecycle(self):
+        for action in ("deactivate", "uninstall"):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as d:
+                state, ident = self.new_filecopy_fixture(d)
+                host = FakeHost()  # systemctl sees NO transient unit after host reboot.
+                with self.assertRaisesRegex(MOD.LifecycleError, "unreconciled filecopy job"):
+                    MOD.change_runtime(action, host.command, filecopy_state=state)
+                self.assertEqual(host.mutations(), [])
+
+    def test_missing_worker_checkpoint_blocks_before_docker_stop(self):
+        with tempfile.TemporaryDirectory() as d:
+            state, _ = self.new_filecopy_fixture(d, include_progress=False)
+            host = FakeHost()
+            with self.assertRaisesRegex(MOD.LifecycleError, "missing manifest/progress"):
+                MOD.change_runtime("deactivate", host.command, filecopy_state=state)
+            self.assertEqual(host.mutations(), [])
+
+    def test_uncertain_and_queued_checkpoints_block_even_if_systemd_is_empty(self):
+        for phase in ("queued", "reconcile_required"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as d:
+                state, _ = self.new_filecopy_fixture(d, phase=phase)
+                host = FakeHost()
+                with self.assertRaises(MOD.LifecycleError):
+                    MOD.change_runtime("uninstall", host.command, filecopy_state=state)
+                self.assertEqual(host.mutations(), [])
+
+    def test_persisted_terminal_jobs_do_not_block_safe_runtime_removal(self):
+        for phase in ("done", "cancelled", "failed"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as d:
+                state, _ = self.new_filecopy_fixture(d, phase=phase)
+                host = FakeHost()
+                self.assertEqual(MOD.change_runtime("deactivate", host.command,
+                                                    filecopy_state=state), (3, 0))
+                self.assertEqual(len(host.restart_disabled), 3)
+
+    def test_symlink_and_foreign_permissions_fail_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            state, ident = self.new_filecopy_fixture(d, phase="done")
+            target = state / (ident + ".progress.json")
+            target.chmod(0o666)
+            with self.assertRaisesRegex(MOD.LifecycleError, "unsafe filecopy checkpoint"):
+                MOD.ensure_no_unreconciled_filecopy_checkpoints(state)
+            target.chmod(0o600)
+            target.unlink()
+            target.symlink_to("/etc/passwd")
+            with self.assertRaisesRegex(MOD.LifecycleError, "unsafe filecopy checkpoint"):
+                MOD.ensure_no_unreconciled_filecopy_checkpoints(state)
+
+    def test_corrupt_or_mismatched_terminal_hash_blocks(self):
+        with tempfile.TemporaryDirectory() as d:
+            state, ident = self.new_filecopy_fixture(d, phase="done")
+            target = state / (ident + ".progress.json")
+            data = json.loads(target.read_text())
+            data["sha256"] = "not-a-sha"
+            target.write_text(json.dumps(data))
+            with self.assertRaisesRegex(MOD.LifecycleError, "terminal filecopy integrity"):
+                MOD.ensure_no_unreconciled_filecopy_checkpoints(state)
+
+    def test_empty_fresh_worker_state_is_safe(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "filecopy-jobs"
+            self.assertIsNone(MOD.ensure_no_unreconciled_filecopy_checkpoints(state))
+            state.mkdir(mode=0o700)
+            self.assertIsNone(MOD.ensure_no_unreconciled_filecopy_checkpoints(state))
+
     def test_read_only_inventory(self):
         host = FakeHost()
         containers, networks, volumes = MOD.inventory(host.command)
