@@ -1,0 +1,70 @@
+name: infinity-million-entry-sensitive-stream-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'internal/sensitive/workspace_million_ci_test.go'
+      - '.github/workflows/infinity-million-entry-sensitive-stream-disposable.yml'
+      - 'internal/sensitive/workspace_stream.go'
+      - 'internal/sensitive/target_tree.go'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  million-entry-synthetic-scan:
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.repository == 'josemirmoura/portico-infinity')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fail-closed disposable CI and disk/inode preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          test "$GITHUB_EVENT_NAME" = pull_request -o "$GITHUB_EVENT_NAME" = workflow_dispatch
+          if env | grep -q '^VPS_AGENT_PHYSICAL_SCOPE_ROOT='; then
+            echo "refusing stress fixture with existing physical scope" >&2
+            exit 1
+          fi
+          test ! -e /srv/portico-infinity
+          test ! -e /usr/local/libexec/portico-infinity
+          test -d "$RUNNER_TEMP" && test ! -L "$RUNNER_TEMP"
+          test -x /usr/bin/time
+          python3 - <<'PY'
+          import os
+          s = os.statvfs(os.environ['RUNNER_TEMP'])
+          free_bytes = s.f_bavail * s.f_frsize
+          free_inodes = s.f_favail
+          print(f'INFINITY_MILLION_ENTRY_CI_CAPACITY: bytes={free_bytes} inodes={free_inodes}')
+          assert free_bytes >= 5 * (1 << 30), 'insufficient scratch bytes for 1M inode fixture'
+          assert free_inodes >= 1_200_000, 'insufficient free inodes for 1M fixture'
+          PY
+      - name: Scan 1M zero-byte entries with real openat2 secret isolation
+        shell: bash
+        env:
+          CI: 'true'
+          PORTICO_CI_MILLION_ENTRY_FIXTURE: synthetic-only
+          GOMEMLIMIT: 600MiB
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          export TMPDIR="$RUNNER_TEMP"
+          /usr/bin/time -v timeout --signal=TERM --kill-after=30s 32m \
+            go test -count=1 -timeout=30m -v ./internal/sensitive \
+              -run '^TestInfinityMillionOrdinaryWorkspaceEntriesStreaming$' 2>&1 \
+              | tee "$RUNNER_TEMP/infinity-million-scale-report.log"
+          grep -F 'INFINITY_SCALE_MILLION_ENTRIES: PASS count=1000000' \
+            "$RUNNER_TEMP/infinity-million-scale-report.log"
+          echo 'INFINITY_MILLION_ENTRY_REAL_SCANNER_E2E: PASS'
