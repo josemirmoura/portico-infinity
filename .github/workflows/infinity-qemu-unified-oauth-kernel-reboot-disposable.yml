@@ -1,0 +1,56 @@
+name: infinity-qemu-unified-oauth-kernel-reboot-disposable
+
+on:
+  pull_request:
+    paths:
+      - scripts/infinity-qemu-oauth-kernel-reboot.sh
+      - tests/integration/infinity-qemu-oauth-guest-setup.sh
+      - tests/integration/infinity-kernel-stack-probe.py
+      - .github/workflows/infinity-qemu-unified-oauth-kernel-reboot-disposable.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oauth-same-kernel-guest:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fail-closed guest-only preflight and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          bash -n scripts/infinity-qemu-oauth-kernel-reboot.sh
+          bash -n tests/integration/infinity-qemu-oauth-guest-setup.sh
+          python3 -m py_compile tests/integration/infinity-kernel-stack-probe.py
+          grep -q 'ZITADEL/Postgres' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          grep -Fq 'VPS_AGENT_INTEGRATED_INTROSPECTION_URL=https://127.0.0.1:18443' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -Fq 'SSL_CERT_FILE=$TLS/ca.pem' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -Fq 'openssl req -x509' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -Fq -- '--cacert "$TLS/ca.pem"' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          ! grep -Fq 'VPS_AGENT_INTEGRATED_INTROSPECTION_URL=http://' tests/integration/infinity-qemu-oauth-guest-setup.sh
+          grep -q 'system_reset' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          grep -Fq 'GUEST_PROBE_SHA_AFTER' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          grep -Fq 'infinity-qemu-oauth-guest-setup.sh --verify' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          ! grep -Fq 'sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --verify' scripts/infinity-qemu-oauth-kernel-reboot.sh
+          ! grep -Fq 'sudo bash /tmp/infinity-qemu-oauth-guest-setup.sh --diagnose' scripts/infinity-qemu-oauth-kernel-reboot.sh
+      - name: Boot, authenticate, reboot and reauthenticate in SAME guest kernel
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test ! -e /srv/portico-infinity
+          bash scripts/infinity-qemu-oauth-kernel-reboot.sh
