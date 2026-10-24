@@ -169,6 +169,22 @@ func (s *Store) migrate() error {
             WHERE tool IN ('compose.pull','compose.up','compose.down')
             AND state IN ('starting','running','active','activating','reloading',
                           'deactivating','cancelling','reconcile_required')`,
+		`CREATE TABLE IF NOT EXISTS compose_unit_cleanup (
+            job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
+            unit_name TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pending','done')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_compose_unit_cleanup_pending
+          ON compose_unit_cleanup(updated_at,job_id) WHERE status='pending'`,
+        `CREATE INDEX IF NOT EXISTS idx_jobs_active_compose_keyset
+          ON jobs(created_at,job_id)
+          WHERE tool IN ('compose.pull','compose.up','compose.down')
+          AND state IN ('starting','running','active','activating','reloading',
+                        'deactivating','cancelling')`,
 		`CREATE TABLE IF NOT EXISTS shell_unit_cleanup (
 			job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
 			unit_name TEXT NOT NULL,
