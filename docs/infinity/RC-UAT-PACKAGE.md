@@ -1,6 +1,6 @@
 # Pórtico Infinity v1.0 | Pacote de aceite técnico e UAT do proprietário
 
-**Estado:** pré-lançamento. Este documento é um roteiro de coleta e decisão, **não** atesta que a v1.0 foi homologada ou lançada. A revisão do candidato é a `main` consolidada após todas as PRs bloqueadoras passarem no respectivo SHA. Sem tag estável, deploy operacional ou anúncio até UAT pessoal + GO registrado.
+**Estado:** pré-lançamento. Em 24/10/2026 o proprietário autorizou e executou no SRV-IA o deploy operacional controlado do candidato identificado abaixo, com backup e rollback preparados. Isso **não** é GO para v1.0, não certifica todos os gates de UAT e não autoriza tag, GitHub Release, promoção adicional ou anúncio público. O SHA de referência é o código efetivamente implantado; mudanças posteriores somente documentais da `main` não mudam retroativamente a revisão instalada.
 
 ## 1. Identificação inequívoca do candidato
 
@@ -8,13 +8,13 @@ Antes de iniciar qualquer UAT, preencher a partir de GitHub e do host **sem divu
 
 | Campo | Valor obrigatório |
 | --- | --- |
-| Revisão Git exata aprovada e verificada | `<SHA40_MAIN_CANDIDATA>` |
-| PRs de último fechamento | [#63](https://github.com/josemirmoura/portico-infinity/pull/63), [#65](https://github.com/josemirmoura/portico-infinity/pull/65), [#64](https://github.com/josemirmoura/portico-infinity/pull/64) |
-| Resultado CI da mesma revisão | `<RUN_URL>`; checks `<X>/<X> SUCCESS` |
-| Host e instancia UAT isolados | `<OPERADOR_CONFIRMA>` |
-| Escopo físico de trabalho autorizado | `<PATH_EXISTENTE>`, padrão `/opt` |
-| Janela autorizada, backup, rollback e acesso externo | `<EVIDENCIA_OPERADOR>` |
-| Versão de Docker/Compose/kernel/cliente MCP | `<COLETA_ANTES_TESTE>` |
+| Revisão de **código candidata instalada** | `48d8c15978a675090a052b977b47abd1fbdd87f9` (merge [#75](https://github.com/josemirmoura/portico-infinity/pull/75)); não é tag v1.0 |
+| PRs de último fechamento | [#73](https://github.com/josemirmoura/portico-infinity/pull/73) (shell outbox), [#74](https://github.com/josemirmoura/portico-infinity/pull/74) (Compose fence), [#75](https://github.com/josemirmoura/portico-infinity/pull/75) (Compose outbox) |
+| Evidência CI por **head SHA** de cada PR incluída no commit final | #73: `e53f1f72bbc81e5101ea672fe3f46d7a39ae9d13`, **9/9** workflows SUCCESS; #74: `2c5c051ac35df5afe6b2875805c972dfbdaeeac0`, **12/12**; #75: `2f70737f670e47a52e159ea20666d244aedde0e8`, **13/13**. Conferir [Actions](https://github.com/josemirmoura/portico-infinity/actions); estes são heads testados, não claims de uma suíte disparada no SHA squash. |
+| Host e instância operacionais do UAT controlado | `srv-ia`, `portico-infinity`; Gateway e Broker próprios, ZITADEL não recriado na atualização. **Não** são ambiente efêmero |
+| Escopo físico de trabalho autorizado | `/opt`, `mode=scoped`, `full_enabled=false`; controlador protegido `/srv/portico-infinity` fora do teto |
+| Autorização, backup e rollback | Proprietário autorizou atualização de Broker/Gateway e testes descartáveis sem reboot/alteração de rede; backup consistente validado e ensaio de restauração SQLite em `/var/backups/portico-infinity/uat-20261024T013805Z`; backup do deploy `/var/backups/portico-infinity/deploy-20261024T015226Z`; SHA anterior `c269d980d91392c2eca9ab92ab2eaa132efc6752`. **Rollback real pós-deploy não foi executado** |
+| Versão Docker/Compose/kernel/cliente MCP | Docker Server `29.9.0`, Compose `5.6.0`; cliente ChatGPT com conector MCP autenticado; kernel e detalhes de refresh de sessão **não coletados** |
 
 Nenhuma aprovação pode ser transferida silenciosamente para um SHA ou instalação diferente. Se um teste altera o código, repetir só os ensaios afetados e registrar nova revisão.
 
@@ -33,6 +33,25 @@ Nenhuma aprovação pode ser transferida silenciosamente para um SHA ou instala�
 | Desinstalação local isolada e componentes host/VPS | [PRs #45 a #49](https://github.com/josemirmoura/portico-infinity/pulls) e [FULL_UNINSTALL.md](FULL_UNINSTALL.md) | Restauração funcional integral de identidade e desmontagem multi-host exclusiva, com autorização |
 
 **Interpretação:** o ambiente descartável prova mecanismos específicos, e os resultados não devem ser generalizados para a infraestrutura do proprietário.
+
+
+## 2A. Evidência operacional SRV-IA vinculada ao SHA instalado (24/10/2026)
+
+Os resultados abaixo se referem **somente** ao host operacional e testes sintéticos explicitamente executados; não equivalem a um E2E multi-host, a uma certificação geral de segurança nem ao UAT pessoal completo. Evidências detalhadas em [Issue #2](https://github.com/josemirmoura/portico-infinity/issues/2), [#12](https://github.com/josemirmoura/portico-infinity/issues/12) e [#68](https://github.com/josemirmoura/portico-infinity/issues/68).
+
+| Caso | Evidência no host real | Parecer |
+| --- | --- | --- |
+| Atualização controlada | Checkout SHA `48d8c15978a675090a052b977b47abd1fbdd87f9`; Broker image `sha256:4e8e9f230572e54e2a1e67f4025286ef57764a95fbbb2e5bf006ecbcec54e632`; Gateway `sha256:9577d46ec5dfd4107532dbcf572aba5108356de4a21df937e99f21b149a155b3`; ambos healthy; ZITADEL mantido; `audit_chain_ok=true` | **PASS** para rollout específico, **não** para rollback em falha real |
+| Migração SQLite | Backup consistente e extração isolada; binário Broker candidato iniciou isolado contra cópia do estado (sem rede); schema v2 com `shell_unit_cleanup` e `compose_unit_cleanup`; 81 jobs preservados, `integrity_check=ok` | **PASS** na cópia e no banco operacional |
+| Reconciliação de histórico incerto | 40 `shell.exec` + 2 `job.start` anteriormente `running` com deadline expirado e unidade `systemd not-found` foram classificados `reconcile_required` sem replay ou sucesso inventado; depois `active_jobs=0` | **PASS** da classificação conservadora; recuperação histórica do resultado original **impossível sem evidência adicional** |
+| Shell não-root e aposentadoria | Job sintético em UID 999, `done/exit_code=0`; falha separada `200/CHDIR` comprovou erro de permissão da pasta UAT; correção apenas no diretório sintético; recibo `shell_unit_cleanup=(done,1)` e unidade `LoadState=not-found` | **PASS** no host |
+| Compose autenticado temporário | `compose.validate` negado antes do grant e validado após decisão SSH; projeto sintético sem rede/volumes/portas e sem pull remoto; `compose.up` e `compose.down` `done/0`, logs systemd confirmados | **PASS** no host |
+| Aposentadoria durável Compose | Dois jobs sintéticos mantiveram `done/exit_code=0`; recibos `compose_unit_cleanup=(done,1)`; `LoadState=not-found`, `ActiveState=inactive`, `SubState=dead` em ambos | **PASS**, evidência operador em [#12](https://github.com/josemirmoura/portico-infinity/issues/12) |
+| Controle de escopo e CRUD | `file.write/read/patch/copy/move/hash/chmod/chown` em diretório sintético, SHA-256 idêntico na cópia; `file.read` fora de `/opt` negado; artefatos removidos individualmente | **PASS** para operações específicas, não para todas as classes adversariais |
+| Revogação da delegação UAT Compose | Delegação temporária de uma pasta criada após aprovação SSH; removida ao final, `revoked_dynamic_delegations=1`, sem jobs dependentes; delegação anterior para Open WebUI preservada | **PASS** para root delegation, **não** prova revogação OAuth da identidade humana |
+| Estado final | `system.health.ok=true`, `audit_chain_ok=true`, `active_jobs=0`, `mode=scoped`, `full_enabled=false`; sem release estável | **PASS** no momento da coleta |
+
+**Gates ainda abertos:** renovação/refresh e revogação real da identidade humana, restauração funcional multi-host, reboot operacional se autorizado separadamente, desinstalação integral sem perdas, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
 
 ## 3. Roteiro mínimo de UAT pessoal, sem intervenção desnecessária
 
