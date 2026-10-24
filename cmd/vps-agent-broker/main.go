@@ -68,6 +68,7 @@ func main() {
 	// jobs retain their prior lifecycle. All systemd units are selected from
 	// the protected SQLite job ledger, never from untrusted MCP arguments.
 	if os.Getenv("VPS_AGENT_INFINITY_PROTECTED_ROOT") != "" {
+        b.ComposeRetirer=broker.SystemdComposeRetirer{}
 		go func() {
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
@@ -92,6 +93,22 @@ func main() {
                         slog.Warn("shell_unit_cleanup_sweep_error", "error", cleanupErr)
                     } else if retired>0 || pending>0 {
                         slog.Info("shell_unit_cleanup_sweep","retired",retired,"retry_pending",pending)
+                    }
+                    // The independent Compose budget is not consumed by a
+                    // saturated shell backlog. Never auto-dispatch Compose.
+                    composeCtx,composeDone:=context.WithTimeout(ctx,25*time.Second)
+                    complete,uncertain,composeErr:=b.ReconcileComposeJobs(composeCtx,64)
+                    clean,still,retireErr:=b.SweepComposeCleanup(composeCtx,64)
+                    composeDone()
+                    if composeErr!=nil {
+                        slog.Warn("compose_job_reconcile_failed","error",composeErr)
+                    }else if complete>0||uncertain>0{
+                        slog.Info("compose_job_reconcile","completed",complete,"requires_operator",uncertain)
+                    }
+                    if retireErr!=nil {
+                        slog.Warn("compose_unit_retirement_failed","error",retireErr)
+                    }else if clean>0||still>0{
+                        slog.Info("compose_unit_retirement","retired",clean,"retry_pending",still)
                     }
 				}
 			}
