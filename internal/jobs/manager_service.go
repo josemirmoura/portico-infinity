@@ -14,6 +14,9 @@ import (
 type Manager struct {
 	State  *state.Store
 	Runner Runner
+	// Enabled only for the Infinity broker. Community legacy behavior remains
+	// unchanged until its own explicitly reviewed migration.
+	DurableShellCleanup bool
 	// Cursor is process-local and reconstructed conservatively after a Broker
 	// restart. The keyset scan itself is always bounded in SQLite.
 	reconcileMu sync.Mutex
@@ -89,12 +92,23 @@ func (m *Manager) Status(ctx context.Context, subject, id string) (state.JobReco
 			return rec, errors.New("reconcile_required: shell job missing a trustworthy state")
 		}
 		if terminal.State != rec.State || terminal.ExitCode != nil || terminal.Detail != "" {
-			changed, err := m.State.UpdateActiveJobState(ctx, rec.ID, terminal.State, terminal.Detail, terminal.ExitCode)
+            var changed bool
+            var err error
+            if m.DurableShellCleanup && (terminal.State=="done" || terminal.State=="failed") {
+                // The outbox and job checkpoint must commit atomically.
+                changed,err=m.State.CompleteShellJobAndQueueCleanup(
+                    ctx,rec.ID,terminal.State,terminal.Detail,terminal.ExitCode)
+            } else {
+                changed,err=m.State.UpdateActiveJobState(ctx,rec.ID,
+                    terminal.State,terminal.Detail,terminal.ExitCode)
+            }
 			if err != nil { return rec, fmt.Errorf("reconcile_required: cannot persist shell job status: %w", err) }
 			rec, statusErr = m.State.GetJob(ctx, rec.ID)
 			if statusErr != nil { return rec, statusErr }
 			if changed && (rec.State == "done" || rec.State == "failed") {
-				if collector, ok := m.Runner.(TerminalCollector); ok { collector.CollectFinished(ctx, job) }
+                if !m.DurableShellCleanup {
+				    if collector, ok := m.Runner.(TerminalCollector); ok { collector.CollectFinished(ctx, job) }
+                }
 			}
 		}
 		return rec, nil
@@ -172,6 +186,41 @@ func (m *Manager) ReconcileShellJobs(ctx context.Context, limit int) (ShellRecon
         if changed { summary.RequiresOperator++ }
     }
     return summary, nil
+}
+
+
+// SweepShellUnitCleanup retries only pending, durable terminal receipts. It
+// never runs a command or broad systemctl discovery. A failed host cleanup
+// remains pending and rotates behind other receipts for a later tick.
+func (m *Manager) SweepShellUnitCleanup(ctx context.Context, limit int)(int,int,error){
+    if m==nil || !m.DurableShellCleanup {return 0,0,nil}
+    if m.State==nil{return 0,0,errors.New("cleanup state unavailable")}
+    retirer,ok:=m.Runner.(DurableTerminalRetirer)
+    if !ok{return 0,0,errors.New("durable cleanup runner unavailable")}
+    if limit<=0||limit>64{limit=64}
+    items,err:=m.State.PendingShellUnitCleanup(ctx,limit)
+    if err!=nil{return 0,0,err}
+    completed,failed:=0,0
+    for _,item:=range items{
+        if ctx.Err()!=nil{return completed,failed,ctx.Err()}
+        job:=Job{ID:item.JobID,Unit:item.Unit,State:"done"}
+        err:=retirer.RetireTerminalUnit(ctx,job)
+        if err!=nil{
+            failed++
+            // Avoid persisting raw systemctl output that could expose
+            // diagnostic details; the operator can read the journal.
+            if dbErr:=m.State.FailShellUnitCleanup(ctx,item.JobID,item.Unit,
+                "cleanup failed; inspect systemd journal");dbErr!=nil{
+                return completed,failed,dbErr
+            }
+            continue
+        }
+        if err:=m.State.FinishShellUnitCleanup(ctx,item.JobID,item.Unit);err!=nil{
+            return completed,failed,err
+        }
+        completed++
+    }
+    return completed,failed,nil
 }
 
 func (m *Manager) Tail(ctx context.Context, subject, id string, lines int) (string, error) {

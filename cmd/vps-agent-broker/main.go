@@ -54,7 +54,8 @@ func main() {
 	b := &broker.Broker{
 		Policy: cfg, FS: fs, State: store,
 		Services: broker.SystemdManager{}, Docker: broker.DockerCLI{},
-		Jobs:       &jobs.Manager{State: store, Runner: jobs.SystemdRunner{}},
+		Jobs:       &jobs.Manager{State: store, Runner: jobs.SystemdRunner{},
+            DurableShellCleanup: os.Getenv("VPS_AGENT_INFINITY_PROTECTED_ROOT") != ""},
 		AdminToken: os.Getenv("VPS_AGENT_ADMIN_TOKEN"),
 		ExpectedSubject: os.Getenv("VPS_AGENT_EXPECTED_SUBJECT"),
 		InstanceID: os.Getenv("VPS_AGENT_INSTANCE_ID"),
@@ -77,6 +78,9 @@ func main() {
 				case <-ticker.C:
 					probe, done := context.WithTimeout(ctx, 25*time.Second)
 					result, err := b.Jobs.ReconcileShellJobs(probe, 64)
+                    // Always attempt already-checkpointed cleanup receipts,
+                    // including after a Broker crash/restart. No command replay.
+                    retired, pending, cleanupErr := b.Jobs.SweepShellUnitCleanup(probe, 64)
 					done()
 					if err != nil {
 						slog.Warn("shell_job_reconcile_failed", "error", err)
@@ -84,6 +88,11 @@ func main() {
 						slog.Info("shell_job_reconcile", "inspected", result.Inspected,
 							"completed", result.Completed, "requires_operator", result.RequiresOperator)
 					}
+                    if cleanupErr != nil {
+                        slog.Warn("shell_unit_cleanup_sweep_error", "error", cleanupErr)
+                    } else if retired>0 || pending>0 {
+                        slog.Info("shell_unit_cleanup_sweep","retired",retired,"retry_pending",pending)
+                    }
 				}
 			}
 		}()

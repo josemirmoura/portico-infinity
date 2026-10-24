@@ -164,3 +164,59 @@ func TestUnpolledShellReconcileRealSystemdSmoke(t *testing.T) {
         t.Fatalf("real systemd unpolled job state=%+v err=%v found=%v logs=%s",rec,err,found,logs)
     }
 }
+
+
+func TestDurableTerminalCleanupRealSystemdSmoke(t *testing.T) {
+    if os.Getenv("VPS_AGENT_SYSTEMD_JOB_SMOKE")!="1" {
+        t.Skip("requires disposable privileged systemd runner")
+    }
+    if _,err:=exec.LookPath("systemd-run");err!=nil{t.Skip("systemd-run unavailable")}
+    ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
+    defer cancel()
+    runner:=SystemdRunner{}
+    unit:=fmt.Sprintf("vps-agent-job-%016x",os.Getpid())
+    job,err:=runner.Start(ctx,sandbox.Spec{
+        Unit:unit,User:"vps-agent-exec",Command:"exit 17",CWD:"/tmp",
+        Runtime:15*time.Second,NetworkMode:"blocked",MemoryMaxBytes:64<<20,TasksMax:16,
+    })
+    if err!=nil{t.Fatal(err)}
+    t.Cleanup(func(){
+        _=exec.Command("systemctl","stop",unit).Run()
+        _=exec.Command("systemctl","reset-failed",unit).Run()
+    })
+    var terminal TerminalStatus
+    deadline:=time.Now().Add(12*time.Second)
+    for time.Now().Before(deadline){
+        terminal,err=runner.DetailedStatus(ctx,job)
+        if err==nil && terminal.State=="failed" {break}
+        time.Sleep(100*time.Millisecond)
+    }
+    if err!=nil||terminal.State!="failed"||terminal.ExitCode==nil||*terminal.ExitCode!=17{
+        t.Fatalf("unproven terminal status: %+v err=%v",terminal,err)
+    }
+    db,err:=state.Open(":memory:")
+    if err!=nil{t.Fatal(err)}
+    defer db.Close()
+    if err:=db.CreateJob(ctx,state.JobRecord{
+        ID:job.ID,UnitName:job.Unit,Subject:"owner",Tool:"shell.exec",
+        State:"running",Deadline:time.Now().Add(time.Minute),
+    });err!=nil{t.Fatal(err)}
+    manager:=&Manager{State:db,Runner:runner,DurableShellCleanup:true}
+    result,err:=manager.Status(ctx,"owner",job.ID)
+    if err!=nil||result.State!="failed"{t.Fatalf("status=%+v err=%v",result,err)}
+    deadline=time.Now().Add(10*time.Second)
+    for time.Now().Before(deadline){
+        completed,_,err:=manager.SweepShellUnitCleanup(ctx,1)
+        if err!=nil{t.Fatal(err)}
+        if completed==1 {break}
+        time.Sleep(100*time.Millisecond)
+    }
+    pending,err:=db.PendingShellUnitCleanup(ctx,1)
+    if err!=nil||len(pending)!=0{
+        t.Fatalf("real systemd unit not durably retired: pending=%+v err=%v",pending,err)
+    }
+    saved,err:=db.GetJob(ctx,job.ID)
+    if err!=nil||saved.State!="failed"||saved.ExitCode==nil||*saved.ExitCode!=17{
+        t.Fatalf("cleanup erased terminal proof: %+v err=%v",saved,err)
+    }
+}

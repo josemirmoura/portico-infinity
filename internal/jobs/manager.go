@@ -46,6 +46,75 @@ type TerminalCollector interface {
 	CollectFinished(context.Context, Job)
 }
 
+// DurableTerminalRetirer is a typed host operation invoked only for a shell
+// job with a proven terminal exit and a matching durable SQLite receipt.
+type DurableTerminalRetirer interface {
+    RetireTerminalUnit(context.Context,Job) error
+}
+
+// safeRetirableShellUnit prevents the cleanup journal from becoming an
+// arbitrary systemctl-stop API. Shell units have deterministic Broker names.
+func safeRetirableShellUnit(unit string)bool {
+    const prefix="vps-agent-job-"
+    if !strings.HasPrefix(unit,prefix)||len(unit)!=len(prefix)+16{return false}
+    for _,ch:=range unit[len(prefix):]{
+        if !((ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')){return false}
+    }
+    return true
+}
+
+func shellUnitLifecycle(raw string)(load,active,sub string){
+    for _,line:=range strings.Split(raw,"\n"){
+        k,v,ok:=strings.Cut(line,"=")
+        if !ok{continue}
+        switch strings.TrimSpace(k){
+        case "LoadState":load=strings.TrimSpace(v)
+        case "ActiveState":active=strings.TrimSpace(v)
+        case "SubState":sub=strings.TrimSpace(v)
+        }
+    }
+    return
+}
+
+func (SystemdRunner) RetireTerminalUnit(ctx context.Context,job Job)error {
+    if !safeRetirableShellUnit(job.Unit){
+        return errors.New("cleanup requires deterministic Broker shell unit name")
+    }
+    inspect:=func()(string,string,string,error){
+        out,err:=hostexec.CommandContext(ctx,"systemctl","show",job.Unit,
+            "--no-pager","--property=LoadState,ActiveState,SubState").CombinedOutput()
+        if err!=nil{return "","","",fmt.Errorf("systemd unit inspection failed: %w",err)}
+        a,b,c:=shellUnitLifecycle(string(out))
+        if a==""{return "","","",errors.New("systemd returned no LoadState")}
+        return a,b,c,nil
+    }
+    load,active,sub,err:=inspect()
+    if err!=nil{return err}
+    if load=="not-found"{return nil} // Already retired by a prior attempt.
+    if load!="loaded"{
+        return fmt.Errorf("unexpected shell unit load state %q",load)
+    }
+    // A later unit with the same name that is actively running is never
+    // stopped by recovery. It requires manual inspection.
+    if !((active=="active"&&sub=="exited")||
+         (active=="failed")||
+         (active=="inactive"&&sub=="dead")){
+        return fmt.Errorf("shell unit still active or state uncertain: %s/%s",active,sub)
+    }
+    if err:=hostexec.CommandContext(ctx,"systemctl","stop",job.Unit).Run();err!=nil {
+        return fmt.Errorf("shell unit stop failed: %w",err)
+    }
+    if err:=hostexec.CommandContext(ctx,"systemctl","reset-failed",job.Unit).Run();err!=nil {
+        return fmt.Errorf("shell unit reset-failed failed: %w",err)
+    }
+    load,active,sub,err=inspect()
+    if err!=nil{return err}
+    if load!="not-found"{
+        return fmt.Errorf("shell unit not yet unloaded (%s/%s/%s)",load,active,sub)
+    }
+    return nil
+}
+
 func classifyShellUnit(raw string) (TerminalStatus, error) {
 	fields := map[string]string{}
 	for _, line := range strings.Split(raw, "\n") {
