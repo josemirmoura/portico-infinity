@@ -93,6 +93,63 @@ func (s *Store) GetJob(ctx context.Context, id string) (JobRecord, error) {
 	return j, nil
 }
 
+
+// ListActiveShellJobsPage performs a bounded keyset scan in SQLite. It does
+// not materialize the entire active-job ledger before applying the limit.
+// Only shell tools are eligible; Compose/filecopy and foreign jobs are
+// deliberately excluded. A zero cursor starts at the oldest eligible row.
+func (s *Store) ListActiveShellJobsPage(
+    ctx context.Context, afterCreated time.Time, afterID string,
+    createdBefore time.Time, limit int,
+) ([]JobRecord, error) {
+    if limit < 1 || limit > 64 {
+        return nil, errors.New("shell reconciliation page limit must be between 1 and 64")
+    }
+    if createdBefore.IsZero() {
+        return nil, errors.New("shell reconciliation cutoff is required")
+    }
+    var cursorNanos int64
+    if !afterCreated.IsZero() {
+        cursorNanos = afterCreated.UnixNano()
+    }
+    rows, err := s.db.QueryContext(ctx,
+        `SELECT job_id FROM jobs
+          WHERE tool IN ('shell.exec','job.start','shell.exec_admin')
+            AND state IN ('starting','running','active','activating','reloading','deactivating','cancelling')
+            AND created_at <= ?
+            AND (created_at > ? OR (created_at = ? AND job_id > ?))
+          ORDER BY created_at, job_id LIMIT ?`,
+        createdBefore.UnixNano(), cursorNanos, cursorNanos, afterID, limit)
+    if err != nil { return nil, err }
+    // Close the rows before calling GetJob, since SQLite is configured with
+    // MaxOpenConns(1) and a nested query would otherwise deadlock.
+    ids := make([]string, 0, limit)
+    for rows.Next() {
+        var id string
+        if err := rows.Scan(&id); err != nil {
+            _ = rows.Close()
+            return nil, err
+        }
+        ids = append(ids, id)
+    }
+    if err := rows.Err(); err != nil {
+        _ = rows.Close()
+        return nil, err
+    }
+    if err := rows.Close(); err != nil { return nil, err }
+    jobs := make([]JobRecord, 0, len(ids))
+    for _, id := range ids {
+        job, err := s.GetJob(ctx, id)
+        if errors.Is(err, sql.ErrNoRows) {
+            // An operator may remove a record after the bounded SELECT.
+            continue
+        }
+        if err != nil { return nil, err }
+        jobs = append(jobs, job)
+    }
+    return jobs, nil
+}
+
 func (s *Store) ListActiveJobs(ctx context.Context) ([]JobRecord, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT job_id FROM jobs WHERE state IN ('starting','running','active','activating','reloading','deactivating','cancelling') ORDER BY created_at`)

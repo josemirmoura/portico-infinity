@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/sandbox"
@@ -13,6 +14,11 @@ import (
 type Manager struct {
 	State  *state.Store
 	Runner Runner
+	// Cursor is process-local and reconstructed conservatively after a Broker
+	// restart. The keyset scan itself is always bounded in SQLite.
+	reconcileMu sync.Mutex
+	reconcileCreated time.Time
+	reconcileID string
 }
 
 func (m *Manager) Start(ctx context.Context, subject, tool, resource, grantID string, spec sandbox.Spec) (state.JobRecord, error) {
@@ -123,18 +129,34 @@ func (m *Manager) ReconcileShellJobs(ctx context.Context, limit int) (ShellRecon
         return summary, errors.New("job reconciler is not configured")
     }
     if limit <= 0 || limit > 64 { limit = 64 }
-    records, err := m.State.ListActiveJobs(ctx)
-    if err != nil { return summary, err }
+    m.reconcileMu.Lock()
+    defer m.reconcileMu.Unlock()
     now := time.Now()
+    cutoff := now.Add(-20 * time.Second)
+    records, err := m.State.ListActiveShellJobsPage(ctx,
+        m.reconcileCreated, m.reconcileID, cutoff, limit)
+    if err != nil { return summary, err }
+    if len(records) == 0 && !m.reconcileCreated.IsZero() {
+        // End of keyset: wrap and advance through older, still-running jobs
+        // without letting them starve new arrivals forever.
+        m.reconcileCreated = time.Time{}
+        m.reconcileID = ""
+        records, err = m.State.ListActiveShellJobsPage(ctx,
+            time.Time{}, "", cutoff, limit)
+        if err != nil { return summary, err }
+    }
     for _, record := range records {
         if ctx.Err() != nil { return summary, ctx.Err() }
-        switch record.Tool {
-        case "shell.exec", "job.start", "shell.exec_admin":
+        // Advance even when the job stays running, so a backlog of live
+        // commands cannot indefinitely starve jobs later in the ledger.
+        m.reconcileCreated = record.CreatedAt
+        m.reconcileID = record.ID
+        // The record may have become terminal between SELECT and GetJob.
+        switch record.State {
+        case "starting", "running", "active", "activating", "reloading", "deactivating", "cancelling":
         default:
-            continue // Do not touch Compose, filecopy or foreign jobs.
+            continue
         }
-        if now.Sub(record.CreatedAt) < 20*time.Second { continue }
-        if summary.Inspected >= limit { break }
         summary.Inspected++
         current, checkErr := m.Status(ctx, record.Subject, record.ID)
         if checkErr == nil && (current.State == "done" || current.State == "failed") {
