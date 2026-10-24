@@ -161,6 +161,20 @@ func (s *Store) migrate() error {
 		  ON jobs(created_at,job_id)
 		  WHERE tool IN ('shell.exec','job.start','shell.exec_admin')
 		    AND state IN ('starting','running','active','activating','reloading','deactivating','cancelling')`,
+		// Persist shell systemd retirement separately from a proven terminal
+		// result. The broker must be able to retry cleanup after a crash without
+		// ever replaying the command. Additive on existing schema v2 stores.
+		`CREATE TABLE IF NOT EXISTS shell_unit_cleanup (
+			job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
+			unit_name TEXT NOT NULL,
+			status TEXT NOT NULL CHECK(status IN ('pending','done')),
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_shell_unit_cleanup_pending
+		  ON shell_unit_cleanup(updated_at, job_id) WHERE status='pending'`,
 		`CREATE TABLE IF NOT EXISTS audit_events (
 			seq INTEGER PRIMARY KEY,
 			event_json TEXT NOT NULL,
