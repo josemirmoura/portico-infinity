@@ -116,3 +116,72 @@ func TestCancellationCannotOverwriteTerminalResult(t *testing.T) {
         t.Fatalf("concurrent terminal state corrupted: %+v err=%v",r,err)
     }
 }
+
+
+type rotatingStatusRunner struct {
+    fakeRunner
+    cleanups int
+}
+func (r *rotatingStatusRunner) DetailedStatus(_ context.Context, job Job) (TerminalStatus, error) {
+    if strings.HasPrefix(job.Unit,"a-stuck-") {
+        return TerminalStatus{State:"running"},nil
+    }
+    code:=0
+    return TerminalStatus{State:"done",ExitCode:&code},nil
+}
+func (r *rotatingStatusRunner) CollectFinished(context.Context,Job) {r.cleanups++}
+
+func TestShellReconcileRotatesUnderBacklogOfLiveJobs(t *testing.T) {
+    db,err:=state.Open(":memory:")
+    if err!=nil {t.Fatal(err)}
+    defer db.Close()
+    ctx:=context.Background()
+    created:=time.Now().Add(-time.Hour).Truncate(time.Second)
+    for i:=0;i<100;i++ {
+        id:=fmt.Sprintf("a-stuck-%03d",i)
+        if i>=80 {id=fmt.Sprintf("z-complete-%03d",i-80)}
+        if err:=db.CreateJob(ctx,state.JobRecord{
+            ID:id,UnitName:id,Subject:"owner",Tool:"shell.exec",
+            State:"running",Deadline:time.Now().Add(time.Hour),
+            CreatedAt:created,
+        });err!=nil {t.Fatal(err)}
+    }
+    // Foreign jobs share the same creation timestamp and must not occupy
+    // any of the bounded slots for shell reconciliation.
+    for i:=0;i<150;i++ {
+        id:=fmt.Sprintf("compose-%03d",i)
+        if err:=db.CreateJob(ctx,state.JobRecord{
+            ID:id,UnitName:id,Subject:"owner",Tool:"compose.up",
+            State:"running",Deadline:time.Now().Add(time.Hour),
+            CreatedAt:created,
+        });err!=nil {t.Fatal(err)}
+    }
+    runner:=&rotatingStatusRunner{}
+    manager:=&Manager{State:db,Runner:runner}
+    first,err:=manager.ReconcileShellJobs(ctx,64)
+    if err!=nil || first.Inspected!=64 || first.Completed!=0 {
+        t.Fatalf("first sweep=%+v err=%v",first,err)
+    }
+    second,err:=manager.ReconcileShellJobs(ctx,64)
+    if err!=nil || second.Inspected!=36 || second.Completed!=20 || runner.cleanups!=20 {
+        t.Fatalf("later completed jobs starved: %+v err=%v cleanups=%d",second,err,runner.cleanups)
+    }
+    third,err:=manager.ReconcileShellJobs(ctx,64)
+    if err!=nil || third.Inspected!=64 || third.Completed!=0 || runner.cleanups!=20 {
+        t.Fatalf("wrap did not resume older active jobs: %+v err=%v cleanups=%d",
+            third,err,runner.cleanups)
+    }
+    // SQLite still contains foreign Compose records untouched by this
+    // reconciler. All completed shell checkpoints remain durable.
+    for i:=0;i<20;i++ {
+        id:=fmt.Sprintf("z-complete-%03d",i)
+        record,err:=db.GetJob(ctx,id)
+        if err!=nil || record.State!="done" || record.ExitCode==nil || *record.ExitCode!=0 {
+            t.Fatalf("lost completion %s: %+v err=%v",id,record,err)
+        }
+    }
+    foreign,err:=db.GetJob(ctx,"compose-100")
+    if err!=nil || foreign.State!="running" {
+        t.Fatalf("foreign Compose job mutated: %+v err=%v",foreign,err)
+    }
+}
