@@ -36,6 +36,10 @@ type Broker struct {
 	Services        ServiceManager
 	Docker          DockerManager
 	Jobs            *jobs.Manager
+	ComposeRetirer ComposeUnitRetirer // Infinity-only; nil in Community
+	composeReconcileMu sync.Mutex
+	composeReconcileCreated time.Time
+	composeReconcileID string
 	AdminToken      string
 	ExpectedSubject string
 	InstanceID      string
