@@ -155,6 +155,12 @@ func (s *Store) migrate() error {
 			exit_code INTEGER,
 			detail TEXT
 		)`,
+		// Additive index is safe on existing v2 stores and avoids scanning
+		// unrelated Compose/filecopy jobs when reconciling a large shell ledger.
+		`CREATE INDEX IF NOT EXISTS idx_jobs_active_shell_keyset
+		  ON jobs(created_at,job_id)
+		  WHERE tool IN ('shell.exec','job.start','shell.exec_admin')
+		    AND state IN ('starting','running','active','activating','reloading','deactivating','cancelling')`,
 		`CREATE TABLE IF NOT EXISTS audit_events (
 			seq INTEGER PRIMARY KEY,
 			event_json TEXT NOT NULL,
