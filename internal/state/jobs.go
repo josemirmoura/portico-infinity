@@ -150,6 +150,29 @@ func (s *Store) ListActiveShellJobsPage(
     return jobs, nil
 }
 
+
+// FirstBlockingComposeJob performs a bounded lookup for a single project.
+// An unresolved earlier dispatch is a resource fence even when it no longer
+// appears in ListActiveJobs. No job from another project or a filecopy/shell
+// operation can be returned.
+func (s *Store) FirstBlockingComposeJob(ctx context.Context, project string)(JobRecord,bool,error){
+    var id string
+    err:=s.db.QueryRowContext(ctx,`
+        SELECT job_id FROM jobs
+        WHERE resource=? AND tool IN ('compose.pull','compose.up','compose.down')
+          AND state IN ('starting','running','active','activating','reloading',
+                        'deactivating','cancelling','reconcile_required')
+        ORDER BY created_at, job_id LIMIT 1`,project).Scan(&id)
+    if errors.Is(err,sql.ErrNoRows){return JobRecord{},false,nil}
+    if err!=nil{return JobRecord{},false,err}
+    record,err:=s.GetJob(ctx,id)
+    if errors.Is(err,sql.ErrNoRows){
+        return JobRecord{},false,errors.New("compose job disappeared during resource fence; operator reconciliation required")
+    }
+    if err!=nil{return JobRecord{},false,err}
+    return record,true,nil
+}
+
 func (s *Store) ListActiveJobs(ctx context.Context) ([]JobRecord, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT job_id FROM jobs WHERE state IN ('starting','running','active','activating','reloading','deactivating','cancelling') ORDER BY created_at`)
