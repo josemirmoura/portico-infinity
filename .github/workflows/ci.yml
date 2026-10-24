@@ -258,3 +258,9 @@ jobs:
             GOCACHE="$GOCACHE" \
             GOMODCACHE="$GOMODCACHE" \
             go test -count=1 -run 'Test(SystemdRunnerSmoke|ShellWorkspaceRealSystemdSmoke|UnpolledShellReconcileRealSystemdSmoke|DurableTerminalCleanupRealSystemdSmoke)' ./internal/jobs
+          sudo --preserve-env=PATH env \
+            VPS_AGENT_SYSTEMD_JOB_SMOKE=1 \
+            GOPATH="$GOPATH" \
+            GOCACHE="$GOCACHE" \
+            GOMODCACHE="$GOMODCACHE" \
+            go test -count=1 -run TestComposeCleanupRealSystemdSmoke ./internal/broker
