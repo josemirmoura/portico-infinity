@@ -164,6 +164,11 @@ func (s *Store) migrate() error {
 		// Persist shell systemd retirement separately from a proven terminal
 		// result. The broker must be able to retry cleanup after a crash without
 		// ever replaying the command. Additive on existing schema v2 stores.
+		`CREATE INDEX IF NOT EXISTS idx_jobs_compose_resource_fence
+            ON jobs(resource,created_at,job_id)
+            WHERE tool IN ('compose.pull','compose.up','compose.down')
+            AND state IN ('starting','running','active','activating','reloading',
+                          'deactivating','cancelling','reconcile_required')`,
 		`CREATE TABLE IF NOT EXISTS shell_unit_cleanup (
 			job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
 			unit_name TEXT NOT NULL,
