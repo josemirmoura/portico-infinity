@@ -139,7 +139,7 @@ func classifyComposeUnit(raw string) (string, string, *int, error) {
 
 func (b *Broker) composeJobStatus(ctx context.Context, record state.JobRecord) (state.JobRecord, error) {
 	switch record.State {
-	case "done", "failed", "cancelled":
+	case "done", "failed", "cancelled", "reconcile_required":
 		return record, nil
 	}
 	out, err := hostexec.CommandContext(ctx, "systemctl", "show", record.UnitName,
@@ -152,11 +152,14 @@ func (b *Broker) composeJobStatus(ctx context.Context, record state.JobRecord) (
 		return record, err
 	}
 	if status != record.State {
-        // Concurrent status requests must never undo a previously persisted
-        // terminal/cancelled state, even when a systemd inspection is stale.
-        if _,err:=b.State.UpdateActiveJobState(ctx,record.ID,status,detail,exitCode);err!=nil{
-            return record,fmt.Errorf("persist Compose job status: %w",err)
+        var err error
+        if b.ComposeRetirer!=nil && (status=="done"||status=="failed"){
+            _,err=b.State.CompleteComposeJobAndQueueCleanup(ctx,record.ID,status,detail,exitCode)
+        }else{
+            // Legacy Community and in-flight states retain bounded CAS.
+            _,err=b.State.UpdateActiveJobState(ctx,record.ID,status,detail,exitCode)
         }
+        if err!=nil{return record,fmt.Errorf("persist Compose job status: %w",err)}
         return b.State.GetJob(ctx,record.ID)
     }
 	return record, nil
