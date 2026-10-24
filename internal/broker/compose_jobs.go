@@ -152,15 +152,22 @@ func (b *Broker) composeJobStatus(ctx context.Context, record state.JobRecord) (
 		return record, err
 	}
 	if status != record.State {
-		if err := b.State.UpdateJobState(ctx, record.ID, status, detail, exitCode); err != nil {
-			return record, fmt.Errorf("persist Compose job status: %w", err)
-		}
-		return b.State.GetJob(ctx, record.ID)
-	}
+        // Concurrent status requests must never undo a previously persisted
+        // terminal/cancelled state, even when a systemd inspection is stale.
+        if _,err:=b.State.UpdateActiveJobState(ctx,record.ID,status,detail,exitCode);err!=nil{
+            return record,fmt.Errorf("persist Compose job status: %w",err)
+        }
+        return b.State.GetJob(ctx,record.ID)
+    }
 	return record, nil
 }
 
 func (b *Broker) composeMutationAsync(ctx context.Context, req wire.Request, action string, starter composeAsyncStarter) wire.Response {
+    // Canonical project spellings prevent path aliases from bypassing the
+    // resource-specific job fence. This does not authorize new paths.
+    if !filepath.IsAbs(req.Resource) || filepath.Clean(req.Resource)!=req.Resource {
+        return deny(req.ID,"invalid_args","Compose project path must be an absolute canonical path")
+    }
 	if b.State == nil {
 		return deny(req.ID, "state_required", "Compose jobs require durable state")
 	}
@@ -201,26 +208,35 @@ func (b *Broker) composeMutationAsync(ctx context.Context, req wire.Request, act
 	abortBeforeDispatch := func() {
 		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
 	}
-	active, err := b.State.ListActiveJobs(ctx)
-	if err != nil {
-		abortBeforeDispatch()
-		return deny(req.ID, "state_error", err.Error())
-	}
-	for _, record := range active {
-		if !strings.HasPrefix(record.Tool, "compose.") ||
-			filepath.Clean(record.Resource) != filepath.Clean(req.Resource) {
-			continue
-		}
-		current, statusErr := b.composeJobStatus(ctx, record)
-		if statusErr != nil {
-			abortBeforeDispatch()
-			return deny(req.ID, "resource_busy", "earlier Compose job status uncertain; inspect before proceeding")
-		}
-		if current.State != "done" && current.State != "failed" && current.State != "cancelled" {
-			abortBeforeDispatch()
-			return deny(req.ID, "resource_busy", "another Compose job is running for this project")
-		}
-	}
+    // Query only this exact Compose project. Never scan the global job list:
+    // large shell/filecopy backlogs must not mask a Compose conflict. An
+    // unresolved Compose job is an explicit fence until operator action.
+    cleared:=false
+    for attempts:=0;attempts<64;attempts++{
+        record,found,err:=b.State.FirstBlockingComposeJob(ctx,req.Resource)
+        if err!=nil{
+            abortBeforeDispatch()
+            return deny(req.ID,"state_error","cannot verify Compose project job fence: "+err.Error())
+        }
+        if !found{cleared=true;break}
+        if record.State=="reconcile_required"{
+            abortBeforeDispatch()
+            return deny(req.ID,"resource_busy","earlier Compose job requires operator reconciliation")
+        }
+        current,statusErr:=b.composeJobStatus(ctx,record)
+        if statusErr!=nil{
+            abortBeforeDispatch()
+            return deny(req.ID,"resource_busy","earlier Compose job status uncertain; inspect before proceeding")
+        }
+        if current.State!="done" && current.State!="failed" && current.State!="cancelled"{
+            abortBeforeDispatch()
+            return deny(req.ID,"resource_busy","another Compose job is running for this project")
+        }
+    }
+    if !cleared {
+        abortBeforeDispatch()
+        return deny(req.ID,"resource_busy","too many previous Compose jobs to reconcile in one request")
+    }
 
 	unit := jobID + ".service"
 	record := state.JobRecord{
