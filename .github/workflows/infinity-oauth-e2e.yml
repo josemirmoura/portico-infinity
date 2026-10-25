@@ -13,6 +13,7 @@ on:
       - 'tests/integration/infinity-oauth-filecopy-revocation.sh'
       - 'tests/integration/infinity-oauth-restart-probe.py'
       - 'scripts/infinity-revoke-filecopy-subject.py'
+      - 'tests/integration/infinity-oauth-human-browser.mjs'
   pull_request:
     paths:
       - '.github/workflows/infinity-oauth-e2e.yml'
@@ -32,7 +33,7 @@ env:
 jobs:
   infinity-real-oauth:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -355,11 +356,25 @@ jobs:
                 entryPoints: [secure]
                 service: real-zitadel
                 tls: {}
+              human-oauth:
+                rule: 'Host("mcp.example.invalid") && (PathPrefix("/oauth/v2") || PathPrefix("/v2") || PathPrefix("/.well-known"))'
+                entryPoints: [secure]
+                service: real-zitadel
+                tls: {}
+              human-login:
+                rule: 'Host("mcp.example.invalid") && PathPrefix("/ui/v2/login")'
+                entryPoints: [secure]
+                service: real-login
+                tls: {}
             services:
               real-zitadel:
                 loadBalancer:
                   servers:
                     - url: "h2c://zitadel-api:8080"
+              real-login:
+                loadBalancer:
+                  servers:
+                    - url: "http://zitadel-login:3000"
           tls:
             certificates:
               - certFile: /pki/server.pem
@@ -822,11 +837,69 @@ jobs:
           print("INFINITY_BROKER_SQLITE_AUDIT_PERSISTS_ACROSS_REAL_PROCESS_RESTART: PASS")
           PY
 
+          # A narrow throwaway browser image contains only code, npm modules
+          # and the public CA. Never bake the PAT, passwords or bearer tokens.
+          mkdir -p "$lab/browser-image"
+          cp tests/integration/infinity-oauth-human-browser.mjs "$lab/browser-image/human-browser.mjs"
+          cp "$lab/ca.pem" "$lab/browser-image/ca.pem"
+          npm install --prefix "$lab/browser-image" --no-audit --no-fund --silent playwright@1.62.1
+          cat > "$lab/browser-image/Dockerfile" <<'DOCKER'
+          FROM mcr.microsoft.com/playwright:v1.62.1-noble
+          WORKDIR /app
+          COPY node_modules/ ./node_modules/
+          COPY human-browser.mjs ./human-browser.mjs
+          COPY ca.pem ./ca.pem
+          ENV NODE_EXTRA_CA_CERTS=/app/ca.pem
+          CMD ["node", "/app/human-browser.mjs"]
+          DOCKER
+          # Dedicated Docker build context excludes all identity secrets.
+          docker build --quiet -t portico-ci-human-browser:disposable "$lab/browser-image" >/dev/null
+          docker run --rm \
+            --mount "type=volume,src=portico-infinity-oauth_zitadel-bootstrap,dst=/zitadel/bootstrap,readonly" \
+            alpine:3.22 cat /zitadel/bootstrap/bootstrap-admin.pat > "$lab/owner.pat"
+          chmod 600 "$lab/owner.pat"
+          # Docker --env-file avoids placing credentials on the command line.
+          python3 - "$lab/owner.pat" "$lab/browser-secrets.env" <<'PY'
+          import json,pathlib,sys
+          secrets=dict(line.split('=',1) for line in pathlib.Path('.env').read_text().splitlines() if '=' in line)
+          identity=json.load(open('/tmp/introspection-app.json',encoding='utf-8'))
+          project=json.load(open('/tmp/resource-project.json',encoding='utf-8'))['id']
+          values={
+              'CI_OPERATOR_SECRET':secrets['CI_OPERATOR_SECRET'],
+              'CI_OWNER_PAT':pathlib.Path(sys.argv[1]).read_text().strip(),
+              'CI_INTROSPECTION_CLIENT_ID':identity['clientId'],
+              'CI_INTROSPECTION_CLIENT_SECRET':identity['clientSecret'],
+              'PORTICO_RESOURCE_PROJECT':project}
+          path=pathlib.Path(sys.argv[2])
+          path.write_text(''.join(key+'='+value+'\n' for key,value in values.items()))
+          path.chmod(0o600)
+          PY
+          docker run --rm --network ci-edge \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --env-file "$lab/browser-secrets.env" \
+            portico-ci-human-browser:disposable > "$lab/human-result.log"
+          python3 - "$lab/human-result.log" "$lab/human-evidence.json" <<'PY'
+          import json,pathlib,sys
+          lines=pathlib.Path(sys.argv[1]).read_text().splitlines()
+          proofs=[line.split('=',1)[1] for line in lines if line.startswith('PORTICO_HUMAN_EVIDENCE_JSON=')]
+          assert len(proofs)==1, 'no sanitized human proof'
+          proof=json.loads(proofs[0])
+          required=[
+              'browser_human_login','code_pkce','refresh_grant',
+              'human_access_introspection','mcp_human_before_revocation',
+              'external_human_deactivation','revoked_human_access_inactive',
+              'mcp_human_after_revocation_401','revoked_refresh_rejected']
+          assert all(proof.get(key) is True for key in required), "human OAuth proof incomplete"
+          assert proof.get('client_chatgpt_real') is False
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(proof,sort_keys=True)+'\n')
+          print('DISPOSABLE_HUMAN_OAUTH_PROOF=PASS')
+          PY
+
           # Same real ZITADEL account + token; privileged Broker and host
           # systemd only in this GitHub-hosted disposable pull-request runner.
           bash tests/integration/infinity-oauth-filecopy-revocation.sh "$lab" "$broker_subject"
 
-          python3 - "$RUNNER_TEMP/portico-e2e-evidence.json" <<'PY'
+          python3 - "$RUNNER_TEMP/portico-e2e-evidence.json" "$lab/human-evidence.json" <<'PY'
           import datetime,json,os,pathlib,sys
           data={
             "type":"Pórtico Infinity OAuth ZITADEL disposable integrated E2E",
@@ -846,6 +919,7 @@ jobs:
                         "durable_systemd_cancel_no_destination",
                         "real_zitadel_subject_deactivated",
                         "revoked_access_token_mcp_401"],
+            "human_oauth_disposable":json.load(open(sys.argv[2],encoding="utf-8")),
             "privileged_broker":True,  # only temporary host-capable Broker for the combined copy test
             "scope":"/opt",
             "controller_outside_scope":"/srv/portico-infinity",
