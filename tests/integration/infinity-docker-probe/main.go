@@ -12,7 +12,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"os/user"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -123,6 +126,58 @@ func main() {
 	}
 	results = append(results, result{Case: "shell.exec real non-root workspace proof", Passed: shellPassed})
 	fail = fail || !shellPassed
+	// Regression: the Broker image deliberately has no portico-infinity-exec
+	// account in its container-local passwd. The policy account exists ONLY
+	// on the disposable host. A successful for_shell mkdir proves that
+	// ownership came from the host namespace, not os/user.Lookup in Docker.
+	workspace := filepath.Join(*directory, "for-shell-workspace")
+	add("file.mkdir", true, map[string]any{"path": workspace, "for_shell": true})
+	hostAccount, hostErr := user.Lookup("portico-infinity-exec")
+	workspaceInfo, statErr := os.Stat(workspace)
+	ownerProven := false
+	if hostErr == nil && statErr == nil {
+		wantUID, uidErr := strconv.ParseUint(hostAccount.Uid, 10, 32)
+		wantGID, gidErr := strconv.ParseUint(hostAccount.Gid, 10, 32)
+		actual, ok := workspaceInfo.Sys().(*syscall.Stat_t)
+		ownerProven = uidErr == nil && gidErr == nil && ok &&
+			uint64(actual.Uid) == wantUID && uint64(actual.Gid) == wantGID &&
+			workspaceInfo.Mode().Perm() == 0750
+	}
+	results = append(results, result{Case: "for_shell workspace owned by host non-root account", Passed: ownerProven})
+	fail = fail || !ownerProven
+	add("file.mkdir", false, map[string]any{"path": workspace, "for_shell": true})
+	add("file.mkdir", false, map[string]any{"path": "/opt", "for_shell": true})
+	add("shell.exec", true, map[string]any{
+		"command": "printf nonroot-for-shell-ok > for-shell-proof.txt",
+		"cwd": workspace, "runtime_seconds": 20,
+	})
+	proofPath := filepath.Join(workspace, "for-shell-proof.txt")
+	forShellWrite := false
+	for attempt := 0; attempt < 40; attempt++ {
+		resp, callErr := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "file.read", Arguments: map[string]any{"path": proofPath},
+		})
+		if callErr == nil && resp != nil && !resp.IsError {
+			payload, encodeErr := json.Marshal(resp)
+			if encodeErr == nil && strings.Contains(string(payload), "nonroot-for-shell-ok") {
+				forShellWrite = true
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	results = append(results, result{Case: "for_shell workspace real host-systemd write", Passed: forShellWrite})
+	fail = fail || !forShellWrite
+	if forShellWrite {
+		add("file.remove", true, map[string]any{"path": proofPath})
+	}
+	if ownerProven && forShellWrite {
+		add("file.remove", true, map[string]any{"path": workspace})
+	}
 	// The .env fixture is intentionally Unix-readable; a successful DENIED
 	// result therefore proves the systemd mask rather than mode bits alone.
 	add("shell.exec", true, map[string]any{
