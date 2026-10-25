@@ -8,7 +8,13 @@
 
 O próprio ChatGPT validou `file.mkdir(for_shell=true)`, proprietário host UID 999/GID 987, escrita shell não-root, negações de pasta existente/raiz/fuga de escopo/symlink e cleanup completo. **Issue #77 fechada.** Inventário Compose real: quatro jobs terminalmente demonstrados, duas provas de cleanup `done` e duas ausentes, sem unidade ainda carregada; Issue #12 permanece aberta. [Registro detalhado, incluindo resultados e limitações](UAT-080-SRVIA-20261025.md).
 
-**Status geral permanece PRE-RELEASE/NO-GO de publicação** até revogação OAuth humana, reboot/recuperação autorizados, reversão/desinstalação multi-host, UAT humano e GO explícito. Não transportar evidências do candidato histórico automaticamente para um novo SHA.
+**Status geral permanece PRE-RELEASE/NO-GO de publicação** até revogação OAuth humana, reversão/desinstalação multi-host, UAT humano e GO explícito. O gate de reboot é tratado como PASS somente na atualização 0B abaixo. Não transportar evidências do candidato histórico automaticamente para um novo SHA.
+
+## 0B. Gate de recuperação pós-reboot real aprovado em 25/10/2026
+
+O proprietário autorizou e executou um **reboot completo do kernel do SRV-IA** após `PREFLIGHT_REBOOT=PASS`. Identidade do boot mudou de `0c6a7f47-a271-4dd2-87b5-f7b90953220a` para `e5dd5620-5de6-49b8-a533-8ba9ef392eec`. O operador comprovou Docker e `wg-quick@wg-infinity` ativos e cinco contêineres (Broker, Gateway, ZITADEL API/Login/Postgres) `healthy`. O ChatGPT reconectou pelo MCP OAuth, validou `scoped /opt`, auditoria íntegra, dados sintéticos persistentes, UID/GID 999:987 e novo job shell `done/exit_code=0` sem root. Os artefatos sintéticos foram removidos e a saúde final permaneceu `ok=true`, `audit_chain_ok=true`, `active_jobs=0`.
+
+**Resultado: PASS do gate I7 para reboot operacional do Pórtico Infinity.** [Evidência exata](UAT-080-SRVIA-20261025.md#gate-i7-recuperação-após-reboot-real-do-srv-ia--pass-em-25102026) e [recibo na issue #2](https://github.com/josemirmoura/portico-infinity/issues/2#issuecomment-6392135403). O teste não comprova saúde de cada LLM/serviço estrangeiro no host, renovação/revogação OAuth humana nem desinstalação multi-host. **PRE-RELEASE permanece, sem GO.**
 
 ## 1. Identificação inequívoca do candidato
 
@@ -59,7 +65,7 @@ Os resultados abaixo se referem **somente** ao host operacional e testes sintét
 | Revogação da delegação UAT Compose | Delegação temporária de uma pasta criada após aprovação SSH; removida ao final, `revoked_dynamic_delegations=1`, sem jobs dependentes; delegação anterior para Open WebUI preservada | **PASS** para root delegation, **não** prova revogação OAuth da identidade humana |
 | Estado final | `system.health.ok=true`, `audit_chain_ok=true`, `active_jobs=0`, `mode=scoped`, `full_enabled=false`; sem release estável | **PASS** no momento da coleta |
 
-**Gates ainda abertos:** renovação/refresh e revogação real da identidade humana, restauração funcional multi-host, reboot operacional se autorizado separadamente, desinstalação integral sem perdas, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
+**Gates ainda abertos (após reboot I7 aprovado):** renovação/refresh e revogação real da identidade humana, restauração funcional multi-host, desinstalação integral sem perdas, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
 
 ## 3. Roteiro mínimo de UAT pessoal, sem intervenção desnecessária
 
