@@ -850,15 +850,22 @@ jobs:
           chmod 600 "$lab/owner.pat"
           mkdir -p "$lab/browser"
           npm install --prefix "$lab/browser" --no-audit --no-fund --silent playwright@1.62.1
+          # Fail early and diagnose bind visibility without exposing secrets.
+          test -s "$lab/human-browser.mjs"
+          test -s "$lab/browser/node_modules/playwright/package.json"
+          docker run --rm \
+            --mount "type=bind,src=$lab,dst=/pki,readonly" \
+            alpine:3.22 sh -c 'test -s /pki/human-browser.mjs && test -s /pki/browser/node_modules/playwright/package.json'
           docker run --rm \
             --network ci-edge \
             --cap-drop ALL --security-opt no-new-privileges:true \
             --mount "type=bind,src=$lab,dst=/pki" \
+            --mount "type=bind,src=$lab/human-browser.mjs,dst=/tmp/human-browser.mjs,readonly" \
             --env NODE_EXTRA_CA_CERTS=/pki/ca.pem \
             --env CI_OPERATOR_SECRET="$(sed -n 's/^CI_OPERATOR_SECRET=//p' .env)" \
             --env PORTICO_RESOURCE_PROJECT="$(python3 -c "import json; print(json.load(open('/tmp/resource-project.json'))['id'])")" \
             mcr.microsoft.com/playwright:v1.62.1-noble \
-            node /pki/human-browser.mjs
+            node /tmp/human-browser.mjs
           test -s "$lab/human-evidence.json"
           python3 - "$lab/human-evidence.json" <<'PY'
           import json,sys
