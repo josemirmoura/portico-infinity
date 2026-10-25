@@ -56,9 +56,15 @@ async function mcpCode(token) {
       authorization: 'Bearer ' + token,
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
-      'MCP-Protocol-Version': '2026-07-28'
+      'MCP-Protocol-Version': '2026-07-28',
+      'Mcp-Method': 'tools/list'
     },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list',
+      params: { _meta: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientInfo': { name: 'human-oauth-disposable', version: '1' },
+        'io.modelcontextprotocol/clientCapabilities': {}
+      } } }),
     signal: AbortSignal.timeout(10000)
   });
   await response.arrayBuffer();
@@ -137,8 +143,9 @@ try {
   if (introspect1.active !== true || introspect1.sub !== subject ||
       !audience.includes(resourceProject)) throw Error('human subject/audience validation failed');
   evidence.human_access_introspection = true;
-  if (await mcpCode(token.body.access_token) !== 200) {
-    throw Error('valid human token did not access MCP tools/list');
+  const firstMCPStatus = await mcpCode(token.body.access_token);
+  if (firstMCPStatus !== 200) {
+    throw Error('valid human token did not access MCP tools/list: HTTP ' + firstMCPStatus);
   }
   evidence.mcp_human_before_revocation = true;
 
@@ -152,9 +159,10 @@ try {
   }
   const introspect2 = await introspect(refreshed.body.access_token,
     introspector.clientId, introspector.clientSecret);
+  const refreshedMCPStatus = await mcpCode(refreshed.body.access_token);
   if (introspect2.active !== true || introspect2.sub !== subject ||
-      await mcpCode(refreshed.body.access_token) !== 200) {
-    throw Error('refreshed human bearer rejected');
+      refreshedMCPStatus !== 200) {
+    throw Error('refreshed human bearer rejected HTTP ' + refreshedMCPStatus);
   }
   evidence.refresh_grant = true;
 
