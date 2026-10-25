@@ -5,12 +5,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require('/pki/browser/node_modules/playwright');
+const { chromium } = require('/tmp/portico-browser/node_modules/playwright');
 const issuer = 'https://mcp.example.invalid';
 const callback = 'https://ci-callback.example.invalid/callback';
 const resourceProject = process.env.PORTICO_RESOURCE_PROJECT;
 const password = process.env.CI_OPERATOR_SECRET;
-const ownerPAT = fs.readFileSync('/pki/owner.pat', 'utf8').trim();
+const ownerPAT = fs.readFileSync('/tmp/portico-fixture/owner.pat', 'utf8').trim();
 if (!resourceProject || !password || !ownerPAT) throw Error('missing disposable fixture');
 const subject = 'ci-operator-001';
 const scope = 'openid profile offline_access urn:zitadel:iam:org:project:id:' +
@@ -130,7 +130,7 @@ try {
   }
   evidence.code_pkce = true;
 
-  const introspector = JSON.parse(fs.readFileSync('/pki/introspection-app.json', 'utf8'));
+  const introspector = JSON.parse(fs.readFileSync('/tmp/portico-fixture/introspection-app.json', 'utf8'));
   const introspect1 = await introspect(token.body.access_token,
     introspector.clientId, introspector.clientSecret);
   const audience = typeof introspect1.aud === 'string'
@@ -192,7 +192,7 @@ try {
     throw Error('unexpected revoked refresh status ' + retryRefresh.status);
   }
   evidence.revoked_refresh_rejected = true;
-  fs.writeFileSync('/pki/human-evidence.json', JSON.stringify(evidence, null, 2) + '\n',
+  fs.writeFileSync('/tmp/portico-fixture/human-evidence.json', JSON.stringify(evidence, null, 2) + '\n',
     { mode: 0o600 });
   console.log('INFINITY_HUMAN_BROWSER_PKCE_REFRESH_REVOKE=PASS');
 } catch (error) {
