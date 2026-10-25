@@ -281,10 +281,13 @@ try {
   let deleted = false;
   for (let attempt = 0; attempt < 20; attempt++) {
     const afterSessions = await searchSessions();
-    if (afterSessions.status !== 200 || !Array.isArray(afterSessions.body.sessions)) {
-      throw Error('session search failed after server-side logout');
+    // Protobuf JSON omits zero-valued repeated fields: missing 'sessions'
+    // after deletion is equivalent to an empty session list.
+    const remaining = afterSessions.body.sessions ?? [];
+    if (afterSessions.status !== 200 || !Array.isArray(remaining)) {
+      throw Error('session search failed after server-side logout HTTP ' + afterSessions.status);
     }
-    if (afterSessions.body.sessions.every(item => !sessionIds.includes(item.id))) {
+    if (remaining.every(item => !sessionIds.includes(item.id))) {
       deleted = true;
       break;
     }
