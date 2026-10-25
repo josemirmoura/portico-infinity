@@ -93,6 +93,19 @@ func main() {
 	}
 	target := filepath.Join(*directory, "real-broker.txt")
 	add("system.info", true, map[string]any{})
+	// Regression: shell.run_as belongs to the HOST, not the Broker image.
+	// This call must succeed via the actual authenticated MCP Gateway/Broker.
+	newShell := filepath.Join(*directory, "new-shell-workspace")
+	add("file.mkdir", true, map[string]any{"path": newShell, "for_shell": true})
+	add("file.mkdir", false, map[string]any{"path": newShell, "for_shell": true}) // no ownership rewrite
+	add("file.mkdir", false, map[string]any{"path": "/opt", "for_shell": true})
+	add("file.mkdir", false, map[string]any{"path": "/etc/portico-infinity-for-shell", "for_shell": true})
+	add("file.mkdir", true, map[string]any{"path": filepath.Join(*directory, "legacy-mkdir-probe"), "for_shell": false})
+	// The host-side systemd sandbox must write in the brand-new leaf without chown.
+	add("shell.exec", true, map[string]any{
+		"command": "printf created-by-nonroot > newly-created-workspace-proof.txt",
+		"cwd": newShell, "runtime_seconds": 20,
+	})
 	add("file.write", true, map[string]any{"path": target, "content": "Pórtico Infinity E2E"})
 	add("file.read", true, map[string]any{"path": target})
 	add("file.chmod", true, map[string]any{"path": target, "mode": 384}) // 0600
