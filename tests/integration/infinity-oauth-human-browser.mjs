@@ -2,6 +2,7 @@
 // No bearer, refresh token, password, cookie, authorization code or PAT is logged.
 import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
+import http2 from 'node:http2';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('/app/node_modules/playwright');
@@ -51,6 +52,37 @@ async function introspect(token, id, secret) {
   if (response.status !== 200) throw Error('introspection HTTP ' + response.status);
   return response.body;
 }
+// Administrative settings stay on ZITADEL's internal h2c API in ci-edge.
+// Never publish an admin route through the public Traefik test proxy.
+async function internalOIDCSettings(method, data) {
+  const client = http2.connect('http://zitadel-api:8080');
+  return new Promise((resolve, reject) => {
+    let status = 0;
+    let responseText = '';
+    const closeError = error => { client.destroy(); reject(error); };
+    client.once('error', closeError);
+    const req = client.request({
+      ':method': method, ':path': '/admin/v1/settings/oidc',
+      ':authority': 'mcp.example.invalid', 'x-forwarded-proto': 'https',
+      authorization: 'Bearer ' + ownerPAT,
+      'content-type': 'application/json'
+    });
+    req.on('response', headers => { status = Number(headers[':status']); });
+    req.on('data', chunk => {
+      responseText += chunk.toString();
+      if (responseText.length > 65536) req.close();
+    });
+    req.once('error', closeError);
+    req.once('end', () => {
+      client.close();
+      let body = {};
+      try { body = JSON.parse(responseText); } catch { /* empty 204 */ }
+      resolve({ status, body });
+    });
+    req.end(data === undefined ? undefined : JSON.stringify(data));
+  });
+}
+
 async function mcpCode(token) {
   const response = await fetch('http://portico-ci-e2e-gateway:8080/mcp', {
     method: 'POST',
@@ -76,25 +108,16 @@ let browser;
 try {
   // Scope is the isolated ZITADEL instance launched for this one GitHub run.
   // Existing service-account credentials were minted before these settings.
-  const shortSettings = await requestJSON('/admin/v1/settings/oidc', {
-    method: 'PUT',
-    headers: {
-      authorization: 'Bearer ' + ownerPAT,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      accessTokenLifetime: '45s',
-      idTokenLifetime: '180s',
-      refreshTokenIdleExpiration: '120s',
-      refreshTokenExpiration: '300s'
-    })
+  const shortSettings = await internalOIDCSettings('PUT', {
+    accessTokenLifetime: '45s',
+    idTokenLifetime: '180s',
+    refreshTokenIdleExpiration: '120s',
+    refreshTokenExpiration: '300s'
   });
   if (![200, 201, 204].includes(shortSettings.status)) {
     throw Error('disposable short-lived token configuration HTTP ' + shortSettings.status);
   }
-  const readSettings = await requestJSON('/admin/v1/settings/oidc', {
-    headers: { authorization: 'Bearer ' + ownerPAT }
-  });
+  const readSettings = await internalOIDCSettings('GET');
   if (readSettings.status !== 200) {
     throw Error('disposable token-settings read-back HTTP ' + readSettings.status);
   }
