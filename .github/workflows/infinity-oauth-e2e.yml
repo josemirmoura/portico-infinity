@@ -13,6 +13,7 @@ on:
       - 'tests/integration/infinity-oauth-filecopy-revocation.sh'
       - 'tests/integration/infinity-oauth-restart-probe.py'
       - 'scripts/infinity-revoke-filecopy-subject.py'
+      - 'tests/integration/infinity-oauth-human-browser.mjs'
   pull_request:
     paths:
       - '.github/workflows/infinity-oauth-e2e.yml'
@@ -32,7 +33,7 @@ env:
 jobs:
   infinity-real-oauth:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -355,11 +356,25 @@ jobs:
                 entryPoints: [secure]
                 service: real-zitadel
                 tls: {}
+              human-oauth:
+                rule: 'Host("mcp.example.invalid") && (PathPrefix("/oauth/v2") || PathPrefix("/v2") || PathPrefix("/.well-known"))'
+                entryPoints: [secure]
+                service: real-zitadel
+                tls: {}
+              human-login:
+                rule: 'Host("mcp.example.invalid") && PathPrefix("/ui/v2/login")'
+                entryPoints: [secure]
+                service: real-login
+                tls: {}
             services:
               real-zitadel:
                 loadBalancer:
                   servers:
                     - url: "h2c://zitadel-api:8080"
+              real-login:
+                loadBalancer:
+                  servers:
+                    - url: "http://zitadel-login:3000"
           tls:
             certificates:
               - certFile: /pki/server.pem
@@ -822,11 +837,45 @@ jobs:
           print("INFINITY_BROKER_SQLITE_AUDIT_PERSISTS_ACROSS_REAL_PROCESS_RESTART: PASS")
           PY
 
+          # Human OAuth: real browser and dedicated user in the same disposable
+          # IdP. Validates authorization_code/PKCE, refresh and revocation while
+          # leaving the original machine subject and the SRV-IA untouched.
+          # Only sanitized evidence is persisted (no browser trace or tokens).
+          cp tests/integration/infinity-oauth-human-browser.mjs "$lab/human-browser.mjs"
+          mkdir -p "$lab/browser"
+          npm install --prefix "$lab/browser" --no-audit --no-fund --silent playwright@1.62.1
+          docker run --rm \
+            --network ci-edge \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --mount "type=bind,src=$lab,dst=/pki" \
+            --env NODE_EXTRA_CA_CERTS=/pki/ca.pem \
+            --env CI_OPERATOR_SECRET="$(sed -n 's/^CI_OPERATOR_SECRET=//p' .env)" \
+            --env PORTICO_RESOURCE_PROJECT="$(python3 - <<'PY'
+import json
+print(json.load(open('/tmp/resource-project.json'))['id'])
+PY
+)" \
+            mcr.microsoft.com/playwright:v1.62.1-noble \
+            node /pki/human-browser.mjs
+          test -s "$lab/human-evidence.json"
+          python3 - "$lab/human-evidence.json" <<'PY'
+import json,sys
+proof=json.load(open(sys.argv[1],encoding='utf-8'))
+required=[
+    'browser_human_login','code_pkce','refresh_grant',
+    'human_access_introspection','mcp_human_before_revocation',
+    'external_human_deactivation','revoked_human_access_inactive',
+    'mcp_human_after_revocation_401','revoked_refresh_rejected']
+assert all(proof.get(key) is True for key in required), "human OAuth proof incomplete"
+assert proof.get('client_chatgpt_real') is False
+print('DISPOSABLE_HUMAN_OAUTH_PROOF=PASS')
+PY
+
           # Same real ZITADEL account + token; privileged Broker and host
           # systemd only in this GitHub-hosted disposable pull-request runner.
           bash tests/integration/infinity-oauth-filecopy-revocation.sh "$lab" "$broker_subject"
 
-          python3 - "$RUNNER_TEMP/portico-e2e-evidence.json" <<'PY'
+          python3 - "$RUNNER_TEMP/portico-e2e-evidence.json" "$lab/human-evidence.json" <<'PY'
           import datetime,json,os,pathlib,sys
           data={
             "type":"Pórtico Infinity OAuth ZITADEL disposable integrated E2E",
@@ -846,6 +895,7 @@ jobs:
                         "durable_systemd_cancel_no_destination",
                         "real_zitadel_subject_deactivated",
                         "revoked_access_token_mcp_401"],
+            "human_oauth_disposable":json.load(open(sys.argv[2],encoding="utf-8")),
             "privileged_broker":True,  # only temporary host-capable Broker for the combined copy test
             "scope":"/opt",
             "controller_outside_scope":"/srv/portico-infinity",
