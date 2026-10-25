@@ -172,9 +172,19 @@ jobs:
           LAB="/opt/infinity-e2e-${INFINITY_RUN_ID}"
           SHELL_UID="$(id -u portico-infinity-exec)"
           SHELL_GID="$(id -g portico-infinity-exec)"
-          test "$(sudo stat -c '%u:%g:%a' "$LAB/new-shell-workspace")" = "${SHELL_UID}:${SHELL_GID}:750"
-          test "$(sudo stat -c '%u' "$LAB/legacy-mkdir-probe")" = 0
-          test "$(sudo stat -c '%a' "$LAB/legacy-mkdir-probe")" = 750
+          ACTUAL_NEW="$(sudo stat -c '%u:%g:%a' "$LAB/new-shell-workspace")"
+          ACTUAL_LEGACY="$(sudo stat -c '%u:%g:%a' "$LAB/legacy-mkdir-probe")"
+          echo "Expected non-root workspace: ${SHELL_UID}:${SHELL_GID}:750"
+          echo "Observed new workspace: $ACTUAL_NEW"
+          echo "Observed legacy workspace: $ACTUAL_LEGACY"
+          if [ "$ACTUAL_NEW" != "${SHELL_UID}:${SHELL_GID}:750" ]; then
+            echo "E2E FAILED: for_shell ownership mismatch" >&2
+            exit 1
+          fi
+          if [ "${ACTUAL_LEGACY%%:*}" != 0 ]; then
+            echo "E2E FAILED: legacy mkdir unexpectedly chowned workspace" >&2
+            exit 1
+          fi
           PROOF_OK=0
           for attempt in $(seq 1 40); do
             if sudo test -f "$LAB/new-shell-workspace/newly-created-workspace-proof.txt" &&
