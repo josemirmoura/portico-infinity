@@ -2,15 +2,14 @@
 // No bearer, refresh token, password, cookie, authorization code or PAT is logged.
 import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require('/tmp/portico-browser/node_modules/playwright');
+const { chromium } = require('/app/node_modules/playwright');
 const issuer = 'https://mcp.example.invalid';
 const callback = 'https://ci-callback.example.invalid/callback';
 const resourceProject = process.env.PORTICO_RESOURCE_PROJECT;
 const password = process.env.CI_OPERATOR_SECRET;
-const ownerPAT = fs.readFileSync('/tmp/portico-fixture/owner.pat', 'utf8').trim();
+const ownerPAT = process.env.CI_OWNER_PAT;
 if (!resourceProject || !password || !ownerPAT) throw Error('missing disposable fixture');
 const subject = 'ci-operator-001';
 const scope = 'openid profile offline_access urn:zitadel:iam:org:project:id:' +
@@ -130,7 +129,7 @@ try {
   }
   evidence.code_pkce = true;
 
-  const introspector = JSON.parse(fs.readFileSync('/tmp/portico-fixture/introspection-app.json', 'utf8'));
+  const introspector = {clientId:process.env.CI_INTROSPECTION_CLIENT_ID,clientSecret:process.env.CI_INTROSPECTION_CLIENT_SECRET};
   const introspect1 = await introspect(token.body.access_token,
     introspector.clientId, introspector.clientSecret);
   const audience = typeof introspect1.aud === 'string'
@@ -192,8 +191,7 @@ try {
     throw Error('unexpected revoked refresh status ' + retryRefresh.status);
   }
   evidence.revoked_refresh_rejected = true;
-  fs.writeFileSync('/tmp/portico-fixture/human-evidence.json', JSON.stringify(evidence, null, 2) + '\n',
-    { mode: 0o600 });
+  console.log('PORTICO_HUMAN_EVIDENCE_JSON=' + JSON.stringify(evidence));
   console.log('INFINITY_HUMAN_BROWSER_PKCE_REFRESH_REVOKE=PASS');
 } catch (error) {
   // Avoid Playwright error messages containing authorization URLs and secrets.
