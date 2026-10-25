@@ -850,26 +850,22 @@ jobs:
             --mount "type=bind,src=$lab,dst=/pki" \
             --env NODE_EXTRA_CA_CERTS=/pki/ca.pem \
             --env CI_OPERATOR_SECRET="$(sed -n 's/^CI_OPERATOR_SECRET=//p' .env)" \
-            --env PORTICO_RESOURCE_PROJECT="$(python3 - <<'PY'
-import json
-print(json.load(open('/tmp/resource-project.json'))['id'])
-PY
-)" \
+            --env PORTICO_RESOURCE_PROJECT="$(python3 -c "import json; print(json.load(open('/tmp/resource-project.json'))['id'])")" \
             mcr.microsoft.com/playwright:v1.62.1-noble \
             node /pki/human-browser.mjs
           test -s "$lab/human-evidence.json"
           python3 - "$lab/human-evidence.json" <<'PY'
-import json,sys
-proof=json.load(open(sys.argv[1],encoding='utf-8'))
-required=[
-    'browser_human_login','code_pkce','refresh_grant',
-    'human_access_introspection','mcp_human_before_revocation',
-    'external_human_deactivation','revoked_human_access_inactive',
-    'mcp_human_after_revocation_401','revoked_refresh_rejected']
-assert all(proof.get(key) is True for key in required), "human OAuth proof incomplete"
-assert proof.get('client_chatgpt_real') is False
-print('DISPOSABLE_HUMAN_OAUTH_PROOF=PASS')
-PY
+          import json,sys
+          proof=json.load(open(sys.argv[1],encoding='utf-8'))
+          required=[
+              'browser_human_login','code_pkce','refresh_grant',
+              'human_access_introspection','mcp_human_before_revocation',
+              'external_human_deactivation','revoked_human_access_inactive',
+              'mcp_human_after_revocation_401','revoked_refresh_rejected']
+          assert all(proof.get(key) is True for key in required), "human OAuth proof incomplete"
+          assert proof.get('client_chatgpt_real') is False
+          print('DISPOSABLE_HUMAN_OAUTH_PROOF=PASS')
+          PY
 
           # Same real ZITADEL account + token; privileged Broker and host
           # systemd only in this GitHub-hosted disposable pull-request runner.
