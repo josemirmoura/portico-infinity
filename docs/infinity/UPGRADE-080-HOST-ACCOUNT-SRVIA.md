@@ -1,6 +1,6 @@
 # Upgrade controlado 080: for_shell / identidade do host (SRV-IA)
 
-**Estado:** proposta de procedimento operador, não executar antes da CI integral da PR e revisão do SHA do próprio script. Requer comando independente por SSH/console **root** e confirmação explícita `--ack-operator-upgrade`. Não é UAT completo nem GO v1.0.
+**Estado (atualizado em 25/10/2026): EXECUTADO com sucesso pelo operador via SSH independente.** O comando administrativo aprovado terminou com `UPGRADE_080_COMPLETED=53a6b14dae42bbe6cfd8eba9605468e7b28b54f7`, backup verificado e auditoria íntegra. O UAT MCP real posterior foi **PASS** e a [Issue #77](https://github.com/josemirmoura/portico-infinity/issues/77) foi encerrada. Detalhes, recibos e limitações estão em [UAT-080-SRVIA-20261025.md](UAT-080-SRVIA-20261025.md). **O roteiro abaixo é histórico e não deve ser repetido sobre a revisão já instalada.** A conclusão deste upgrade não constitui GO v1.0 nem autoriza reboot, revogação de OAuth, desinstalação ou publicação.
 
 ## Revisões fixadas
 
