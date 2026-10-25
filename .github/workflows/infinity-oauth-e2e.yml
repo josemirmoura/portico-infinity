@@ -837,40 +837,53 @@ jobs:
           print("INFINITY_BROKER_SQLITE_AUDIT_PERSISTS_ACROSS_REAL_PROCESS_RESTART: PASS")
           PY
 
-          # Human OAuth: real browser and dedicated user in the same disposable
-          # IdP. Validates authorization_code/PKCE, refresh and revocation while
-          # leaving the original machine subject and the SRV-IA untouched.
-          # Only sanitized evidence is persisted (no browser trace or tokens).
-          cp tests/integration/infinity-oauth-human-browser.mjs "$lab/human-browser.mjs"
-          # Admin PAT belongs exclusively to this disposable container volume.
-          # It is never sent to the MCP Gateway, logs, uploads or production.
+          # A narrow throwaway browser image contains only code, npm modules
+          # and the public CA. Never bake the PAT, passwords or bearer tokens.
+          mkdir -p "$lab/browser-image"
+          cp tests/integration/infinity-oauth-human-browser.mjs "$lab/browser-image/human-browser.mjs"
+          cp "$lab/ca.pem" "$lab/browser-image/ca.pem"
+          npm install --prefix "$lab/browser-image" --no-audit --no-fund --silent playwright@1.62.1
+          cat > "$lab/browser-image/Dockerfile" <<'DOCKER'
+          FROM mcr.microsoft.com/playwright:v1.62.1-noble
+          WORKDIR /app
+          COPY node_modules/ ./node_modules/
+          COPY human-browser.mjs ./human-browser.mjs
+          COPY ca.pem ./ca.pem
+          ENV NODE_EXTRA_CA_CERTS=/app/ca.pem
+          CMD ["node", "/app/human-browser.mjs"]
+          DOCKER
+          # Dedicated Docker build context excludes all identity secrets.
+          docker build --quiet -t portico-ci-human-browser:disposable "$lab/browser-image" >/dev/null
           docker run --rm \
             --mount "type=volume,src=portico-infinity-oauth_zitadel-bootstrap,dst=/zitadel/bootstrap,readonly" \
             alpine:3.22 cat /zitadel/bootstrap/bootstrap-admin.pat > "$lab/owner.pat"
           chmod 600 "$lab/owner.pat"
-          mkdir -p "$lab/browser"
-          npm install --prefix "$lab/browser" --no-audit --no-fund --silent playwright@1.62.1
-          # Fail early and diagnose bind visibility without exposing secrets.
-          test -s "$lab/human-browser.mjs"
-          test -s "$lab/browser/node_modules/playwright/package.json"
-          docker run --rm \
-            --mount "type=bind,src=$lab,dst=/pki,readonly" \
-            alpine:3.22 sh -c 'test -s /pki/human-browser.mjs && test -s /pki/browser/node_modules/playwright/package.json'
-          docker run --rm \
-            --network ci-edge \
+          # Docker --env-file avoids placing credentials on the command line.
+          python3 - "$lab/owner.pat" "$lab/browser-secrets.env" <<'PY'
+          import json,pathlib,sys
+          secrets=dict(line.split('=',1) for line in pathlib.Path('.env').read_text().splitlines() if '=' in line)
+          identity=json.load(open('/tmp/introspection-app.json',encoding='utf-8'))
+          project=json.load(open('/tmp/resource-project.json',encoding='utf-8'))['id']
+          values={
+              'CI_OPERATOR_SECRET':secrets['CI_OPERATOR_SECRET'],
+              'CI_OWNER_PAT':pathlib.Path(sys.argv[1]).read_text().strip(),
+              'CI_INTROSPECTION_CLIENT_ID':identity['clientId'],
+              'CI_INTROSPECTION_CLIENT_SECRET':identity['clientSecret'],
+              'PORTICO_RESOURCE_PROJECT':project}
+          path=pathlib.Path(sys.argv[2])
+          path.write_text(''.join(key+'='+value+'\n' for key,value in values.items()))
+          path.chmod(0o600)
+          PY
+          docker run --rm --network ci-edge \
             --cap-drop ALL --security-opt no-new-privileges:true \
-            --mount "type=bind,src=$lab,dst=/tmp/portico-fixture" \
-            --mount "type=bind,src=$lab/browser,dst=/tmp/portico-browser,readonly" \
-            --mount "type=bind,src=$lab/human-browser.mjs,dst=/tmp/human-browser.mjs,readonly" \
-            --env NODE_EXTRA_CA_CERTS=/tmp/portico-fixture/ca.pem \
-            --env CI_OPERATOR_SECRET="$(sed -n 's/^CI_OPERATOR_SECRET=//p' .env)" \
-            --env PORTICO_RESOURCE_PROJECT="$(python3 -c "import json; print(json.load(open('/tmp/resource-project.json'))['id'])")" \
-            mcr.microsoft.com/playwright:v1.62.1-noble \
-            sh -c 'test -s /tmp/human-browser.mjs && test -s /tmp/portico-browser/node_modules/playwright/package.json && test -s /tmp/portico-fixture/ca.pem && exec node /tmp/human-browser.mjs'
-          test -s "$lab/human-evidence.json"
-          python3 - "$lab/human-evidence.json" <<'PY'
-          import json,sys
-          proof=json.load(open(sys.argv[1],encoding='utf-8'))
+            --env-file "$lab/browser-secrets.env" \
+            portico-ci-human-browser:disposable > "$lab/human-result.log"
+          python3 - "$lab/human-result.log" "$lab/human-evidence.json" <<'PY'
+          import json,pathlib,sys
+          lines=pathlib.Path(sys.argv[1]).read_text().splitlines()
+          proofs=[line.split('=',1)[1] for line in lines if line.startswith('PORTICO_HUMAN_EVIDENCE_JSON=')]
+          assert len(proofs)==1, 'no sanitized human proof'
+          proof=json.loads(proofs[0])
           required=[
               'browser_human_login','code_pkce','refresh_grant',
               'human_access_introspection','mcp_human_before_revocation',
@@ -878,6 +891,7 @@ jobs:
               'mcp_human_after_revocation_401','revoked_refresh_rejected']
           assert all(proof.get(key) is True for key in required), "human OAuth proof incomplete"
           assert proof.get('client_chatgpt_real') is False
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(proof,sort_keys=True)+'\n')
           print('DISPOSABLE_HUMAN_OAUTH_PROOF=PASS')
           PY
 
