@@ -52,10 +52,19 @@ func resolveHostShellAccount(ctx context.Context, runAs string) (int, int, error
     if err != nil || len(data) == 0 || len(data) > 4096 {
         return 0, 0, errors.New("host account lookup unavailable")
     }
+    return parseHostShellAccountRecord(runAs, data)
+}
+
+// Keep validation independent of NSS, so hostile or malformed responses can
+// be regression-tested without running any process as root.
+func parseHostShellAccountRecord(runAs string, data []byte) (int, int, error) {
+    if len(data) == 0 || len(data) > 4096 {
+        return 0, 0, errors.New("host shell account response size invalid")
+    }
     record := strings.TrimSuffix(string(data), "\n")
     fields := strings.Split(record, ":")
     if len(fields) != 7 || fields[0] != runAs ||
-       strings.ContainsAny(record, "\r\n\x00") {
+        strings.ContainsAny(record, "\r\n\x00") {
         return 0, 0, errors.New("invalid host account lookup response")
     }
     uid, err := strconv.Atoi(fields[2])
