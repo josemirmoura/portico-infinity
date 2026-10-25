@@ -21,7 +21,9 @@ const evidence = { browser_human_login: false, code_pkce: false, refresh_grant: 
   human_access_introspection: false, mcp_human_before_revocation: false,
   external_human_deactivation: false, revoked_human_access_inactive: false,
   mcp_human_after_revocation_401: false, revoked_refresh_rejected: false,
-  client_chatgpt_real: false };
+  short_access_lifetime: false, expired_bearer_inactive: false,
+  expired_bearer_mcp_401: false, refresh_after_access_expiry: false,
+  human_browser_session_terminated: false, client_chatgpt_real: false };
 
 async function requestJSON(path, options = {}) {
   const response = await fetch(issuer + path, {
@@ -72,6 +74,31 @@ async function mcpCode(token) {
 }
 let browser;
 try {
+  // Scope is the isolated ZITADEL instance launched for this one GitHub run.
+  // Existing service-account credentials were minted before these settings.
+  const shortSettings = await requestJSON('/admin/v1/settings/oidc', {
+    method: 'PUT',
+    headers: {
+      authorization: 'Bearer ' + ownerPAT,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      accessTokenLifetime: '45s',
+      idTokenLifetime: '180s',
+      refreshTokenIdleExpiration: '120s',
+      refreshTokenExpiration: '300s'
+    })
+  });
+  if (![200, 201, 204].includes(shortSettings.status)) {
+    throw Error('disposable short-lived token configuration HTTP ' + shortSettings.status);
+  }
+  const readSettings = await requestJSON('/admin/v1/settings/oidc', {
+    headers: { authorization: 'Bearer ' + ownerPAT }
+  });
+  if (readSettings.status !== 200) {
+    throw Error('disposable token-settings read-back HTTP ' + readSettings.status);
+  }
+
   const registration = await requestJSON('/oauth/v2/register', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -142,6 +169,11 @@ try {
     ? [introspect1.aud] : (introspect1.aud || []);
   if (introspect1.active !== true || introspect1.sub !== subject ||
       !audience.includes(resourceProject)) throw Error('human subject/audience validation failed');
+  const firstLifetime = Number(introspect1.exp) - Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(firstLifetime) || firstLifetime < 8 || firstLifetime > 65) {
+    throw Error('human access token did not receive disposable short lifetime');
+  }
+  evidence.short_access_lifetime = true;
   evidence.human_access_introspection = true;
   const firstMCPStatus = await mcpCode(token.body.access_token);
   if (firstMCPStatus !== 200) {
@@ -166,6 +198,78 @@ try {
   }
   evidence.refresh_grant = true;
 
+  // Real wall-clock expiration, not a forged timestamp or forced revocation.
+  // Poll against ZITADEL and Gateway independently and bound the wait.
+  const expiryDeadline = Date.now() + 75000;
+  const firstExpiry = Number(introspect1.exp) * 1000;
+  if (!Number.isFinite(firstExpiry)) throw Error('missing token exp from real ZITADEL');
+  if (firstExpiry > expiryDeadline) throw Error('access expiry exceeds disposable test budget');
+  while (Date.now() < firstExpiry + 1800) {
+    if (Date.now() > expiryDeadline) throw Error('real access expiry timed out');
+    await new Promise(resolve => setTimeout(resolve, Math.min(1000, firstExpiry + 1800 - Date.now())));
+  }
+  const expired = await introspect(token.body.access_token,
+    introspector.clientId, introspector.clientSecret);
+  if (expired.active !== false) throw Error('expired human bearer still introspects as active');
+  evidence.expired_bearer_inactive = true;
+  if (await mcpCode(token.body.access_token) !== 401) {
+    throw Error('real Gateway accepted expired human access bearer');
+  }
+  evidence.expired_bearer_mcp_401 = true;
+
+  // Refresh must remain useful after ACCESS expiry, until its own policy expires.
+  const afterExpiry = await form('/oauth/v2/token', {
+    grant_type: 'refresh_token', client_id: clientId,
+    refresh_token: refreshed.body.refresh_token
+  });
+  if (afterExpiry.status !== 200 || !afterExpiry.body.access_token ||
+      !afterExpiry.body.refresh_token ||
+      await mcpCode(afterExpiry.body.access_token) !== 200) {
+    throw Error('human refresh failed after access expiry HTTP ' + afterExpiry.status);
+  }
+  evidence.refresh_after_access_expiry = true;
+
+  // Explicit *server-side browser SSO session termination*, not token
+  // revocation. Logout does not by itself imply that previously minted
+  // bearer/refresh tokens have been revoked (those are checked separately).
+  const searchSessions = async () => requestJSON('/v2/sessions/search', {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + ownerPAT,
+      'content-type': 'application/json' },
+    body: JSON.stringify({ queries: [{ userIdQuery: { id: subject } }] })
+  });
+  const beforeSessions = await searchSessions();
+  if (beforeSessions.status !== 200 || !Array.isArray(beforeSessions.body.sessions) ||
+      beforeSessions.body.sessions.length === 0) {
+    throw Error('disposable human Login V2 session missing from session search');
+  }
+  const sessionIds = beforeSessions.body.sessions.map(session => session.id);
+  if (sessionIds.some(id => typeof id !== 'string' || id.length === 0)) {
+    throw Error('session search returned invalid session identifier');
+  }
+  for (const id of sessionIds) {
+    const terminated = await requestJSON('/v2/sessions/' + encodeURIComponent(id), {
+      method: 'DELETE', headers: { authorization: 'Bearer ' + ownerPAT }
+    });
+    if (![200, 204].includes(terminated.status)) {
+      throw Error('server-side logout rejected HTTP ' + terminated.status);
+    }
+  }
+  let deleted = false;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const afterSessions = await searchSessions();
+    if (afterSessions.status !== 200 || !Array.isArray(afterSessions.body.sessions)) {
+      throw Error('session search failed after server-side logout');
+    }
+    if (afterSessions.body.sessions.every(item => !sessionIds.includes(item.id))) {
+      deleted = true;
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  if (!deleted) throw Error('human browser SSO session still exists after termination');
+  evidence.human_browser_session_terminated = true;
+
   const deactivated = await requestJSON('/v2/users/' + subject + '/deactivate', {
     method: 'POST', headers: { authorization: 'Bearer ' + ownerPAT }
   });
@@ -177,20 +281,20 @@ try {
   // Bound retry for eventual consistency, never succeed on status alone.
   let inactive = false;
   for (let i = 0; i < 16; i++) {
-    const after = await introspect(refreshed.body.access_token,
+    const after = await introspect(afterExpiry.body.access_token,
       introspector.clientId, introspector.clientSecret);
     if (after.active === false) { inactive = true; break; }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   if (!inactive) throw Error('deactivated human access token remains active');
   evidence.revoked_human_access_inactive = true;
-  if (await mcpCode(refreshed.body.access_token) !== 401) {
+  if (await mcpCode(afterExpiry.body.access_token) !== 401) {
     throw Error('MCP still accepts revoked human token');
   }
   evidence.mcp_human_after_revocation_401 = true;
   const retryRefresh = await form('/oauth/v2/token', {
     grant_type: 'refresh_token', client_id: clientId,
-    refresh_token: refreshed.body.refresh_token
+    refresh_token: afterExpiry.body.refresh_token
   });
   if (retryRefresh.status === 200 || retryRefresh.body.access_token) {
     throw Error('deactivated human refresh still returns token');
