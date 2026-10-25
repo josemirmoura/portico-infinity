@@ -888,7 +888,10 @@ jobs:
               'browser_human_login','code_pkce','refresh_grant',
               'human_access_introspection','mcp_human_before_revocation',
               'external_human_deactivation','revoked_human_access_inactive',
-              'mcp_human_after_revocation_401','revoked_refresh_rejected']
+              'mcp_human_after_revocation_401','revoked_refresh_rejected',
+              'short_access_lifetime','expired_bearer_inactive',
+              'expired_bearer_mcp_401','refresh_after_access_expiry',
+              'human_browser_session_terminated']
           assert all(proof.get(key) is True for key in required), "human OAuth proof incomplete"
           assert proof.get('client_chatgpt_real') is False
           pathlib.Path(sys.argv[2]).write_text(json.dumps(proof,sort_keys=True)+'\n')
