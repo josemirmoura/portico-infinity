@@ -842,6 +842,12 @@ jobs:
           # leaving the original machine subject and the SRV-IA untouched.
           # Only sanitized evidence is persisted (no browser trace or tokens).
           cp tests/integration/infinity-oauth-human-browser.mjs "$lab/human-browser.mjs"
+          # Admin PAT belongs exclusively to this disposable container volume.
+          # It is never sent to the MCP Gateway, logs, uploads or production.
+          docker run --rm \
+            --mount "type=volume,src=portico-infinity-oauth_zitadel-bootstrap,dst=/zitadel/bootstrap,readonly" \
+            alpine:3.22 cat /zitadel/bootstrap/bootstrap-admin.pat > "$lab/owner.pat"
+          chmod 600 "$lab/owner.pat"
           mkdir -p "$lab/browser"
           npm install --prefix "$lab/browser" --no-audit --no-fund --silent playwright@1.62.1
           docker run --rm \
