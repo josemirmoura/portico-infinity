@@ -3,6 +3,7 @@ name: infinity-real-docker-disposable-e2e
 on:
   pull_request:
     paths:
+      - 'compose.yaml'
       - 'internal/broker/**'
       - 'tests/integration/infinity-docker-probe/**'
       - 'tests/integration/infinity-filecopy-mcp-probe/**'
@@ -166,6 +167,26 @@ jobs:
           echo "::add-mask::$TOKEN"
           export INFINITY_E2E_BEARER_TOKEN="$TOKEN"
           go run ./tests/integration/infinity-docker-probe             --directory "/opt/infinity-e2e-${INFINITY_RUN_ID}"             --output "$RUNNER_TEMP/infinity-real-docker-evidence.json"
+          # End-to-end ownership, not only an MCP success response:
+          # a fresh for_shell=true leaf must admit the real host systemd UID.
+          LAB="/opt/infinity-e2e-${INFINITY_RUN_ID}"
+          SHELL_UID="$(id -u portico-infinity-exec)"
+          SHELL_GID="$(id -g portico-infinity-exec)"
+          test "$(sudo stat -c '%u:%g:%a' "$LAB/new-shell-workspace")" = "${SHELL_UID}:${SHELL_GID}:750"
+          test "$(sudo stat -c '%u' "$LAB/legacy-mkdir-probe")" = 0
+          test "$(sudo stat -c '%a' "$LAB/legacy-mkdir-probe")" = 750
+          PROOF_OK=0
+          for attempt in $(seq 1 40); do
+            if sudo test -f "$LAB/new-shell-workspace/newly-created-workspace-proof.txt" &&
+               [ "$(sudo cat "$LAB/new-shell-workspace/newly-created-workspace-proof.txt")" = created-by-nonroot ]; then
+              PROOF_OK=1
+              break
+            fi
+            sleep 0.5
+          done
+          test "$PROOF_OK" = 1
+          test "$(sudo stat -c '%u:%g' "$LAB/new-shell-workspace/newly-created-workspace-proof.txt")" = "${SHELL_UID}:${SHELL_GID}"
+          echo "MCP_FOR_SHELL_HOST_ACCOUNT_UID_GID_AND_SYSTEMD: PASS"
           sudo test ! -e /etc/portico-infinity-escape.txt
           sudo test -f /srv/portico-infinity/config/policy.yaml
           sudo grep -q '^mode: scoped$' /srv/portico-infinity/config/policy.yaml
