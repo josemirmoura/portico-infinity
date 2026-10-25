@@ -69,7 +69,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(result["counts"]["receipt_done"], 1)
         self.assertEqual(result["counts"]["unit_absent"], 1)
         self.assertEqual(before, hashlib.sha256(self.db.read_bytes()).hexdigest())
-        self.assertTrue(all(x.args[0][0] in ("show", "list-units") for x in calls.call_args_list))
+        self.assertTrue(all(x.args[0] in ("show", "list-units") for x in calls.call_args_list))
 
     def test_missing_unit_never_proves_an_old_running_job_success(self):
         self.job(state="running", exit_code=None, receipt=None)
