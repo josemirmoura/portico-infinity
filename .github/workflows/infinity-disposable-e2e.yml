@@ -311,6 +311,15 @@ jobs:
             sudo rm -f -- /usr/local/libexec/portico-infinity/portico-filecopy-worker
             sudo rmdir /usr/local/libexec/portico-infinity 2>/dev/null || true
           fi
-          if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
+          if [[ "${INFINITY_RUN_ID:-}" =~ ^[0-9]{1,24}$ ]] &&
+             [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}" ] &&
+             [ ! -L "/opt/infinity-e2e-${INFINITY_RUN_ID}" ]; then
+            # Remove only the disposable for_shell test artifacts, not an
+            # arbitrary workspace and never a symlink supplied by a model.
+            if [ -d "/opt/infinity-e2e-${INFINITY_RUN_ID}/for-shell-workspace" ] &&
+               [ ! -L "/opt/infinity-e2e-${INFINITY_RUN_ID}/for-shell-workspace" ]; then
+              sudo rm -f -- "/opt/infinity-e2e-${INFINITY_RUN_ID}/for-shell-workspace/for-shell-proof.txt"
+              sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}/for-shell-workspace" 2>/dev/null || true
+            fi
             sudo rmdir "/opt/infinity-e2e-${INFINITY_RUN_ID}" 2>/dev/null || true
           fi
