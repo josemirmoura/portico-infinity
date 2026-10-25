@@ -8,13 +8,21 @@
 
 O próprio ChatGPT validou `file.mkdir(for_shell=true)`, proprietário host UID 999/GID 987, escrita shell não-root, negações de pasta existente/raiz/fuga de escopo/symlink e cleanup completo. **Issue #77 fechada.** Inventário Compose real: quatro jobs terminalmente demonstrados, duas provas de cleanup `done` e duas ausentes, sem unidade ainda carregada; Issue #12 permanece aberta. [Registro detalhado, incluindo resultados e limitações](UAT-080-SRVIA-20261025.md).
 
-**Status geral permanece PRE-RELEASE/NO-GO de publicação** até revogação OAuth humana, reversão/desinstalação multi-host, UAT humano e GO explícito. O gate de reboot é tratado como PASS somente na atualização 0B abaixo. Não transportar evidências do candidato histórico automaticamente para um novo SHA.
+**Status geral permanece PRE-RELEASE/NO-GO de publicação** até aceite da sessão OAuth humana no cliente ChatGPT real, reversão/desinstalação multi-host, UAT humano e GO explícito. O gate de reboot é tratado como PASS somente na atualização 0B abaixo. Não transportar evidências do candidato histórico automaticamente para um novo SHA.
 
 ## 0B. Gate de recuperação pós-reboot real aprovado em 25/10/2026
 
 O proprietário autorizou e executou um **reboot completo do kernel do SRV-IA** após `PREFLIGHT_REBOOT=PASS`. Identidade do boot mudou de `0c6a7f47-a271-4dd2-87b5-f7b90953220a` para `e5dd5620-5de6-49b8-a533-8ba9ef392eec`. O operador comprovou Docker e `wg-quick@wg-infinity` ativos e cinco contêineres (Broker, Gateway, ZITADEL API/Login/Postgres) `healthy`. O ChatGPT reconectou pelo MCP OAuth, validou `scoped /opt`, auditoria íntegra, dados sintéticos persistentes, UID/GID 999:987 e novo job shell `done/exit_code=0` sem root. Os artefatos sintéticos foram removidos e a saúde final permaneceu `ok=true`, `audit_chain_ok=true`, `active_jobs=0`.
 
 **Resultado: PASS do gate I7 para reboot operacional do Pórtico Infinity.** [Evidência exata](UAT-080-SRVIA-20261025.md#gate-i7-recuperação-após-reboot-real-do-srv-ia--pass-em-25102026) e [recibo na issue #2](https://github.com/josemirmoura/portico-infinity/issues/2#issuecomment-6392135403). O teste não comprova saúde de cada LLM/serviço estrangeiro no host, renovação/revogação OAuth humana nem desinstalação multi-host. **PRE-RELEASE permanece, sem GO.**
+
+## 0C. Login humano OAuth no laboratório efêmero aprovado em 25/10/2026
+
+A [PR #85](https://github.com/josemirmoura/portico-infinity/pull/85) adicionou e integrou um novo caso com **Chromium real e ZITADEL/Login V2/PostgreSQL/Gateway/Broker reais exclusivamente descartáveis no GitHub Actions**. Merge SHA **`4c3adf488b0aa9fedd30aaf9b9df047c6ab70e43`**, após **8/8 workflows SUCCESS** no head testado **`29690a4da783f9362511a5bc2d33b80e6d8effa3`**. [Run autenticado #40243513297](https://github.com/josemirmoura/portico-infinity/actions/runs/40243513297) registrou `DISPOSABLE_HUMAN_OAUTH_PROOF=PASS` e preservou [artefato sanitizado](https://github.com/josemirmoura/portico-infinity/actions/runs/40243513297) `infinity-real-oauth-disposable-e2e` (ID `12618325991`, retenção inicial de 14 dias).
+
+A prova de **identidade humana sintética** exige todos estes resultados reais antes de marcar PASS: login Chromium, Authorization Code com **PKCE S256**, emissão de bearer e refresh token, introspecção de identidade/audiência, acesso MCP válido, renovação com refresh, desativação administrativa externa da identidade, `active=false` em introspecção posterior, HTTP 401 no MCP com bearer revogado e rejeição do refresh posteriormente usado. O fluxo histórico de conta de serviço, cópia longa e revogação externa também passou. Segredos ficam exclusivamente no runner; artefatos persistidos registram apenas booleanos.
+
+**Escopo e limitações:** **PASS apenas do laboratório OAuth humano descartável**. O cliente do teste foi Chromium automatizado, **não o ChatGPT real**. A desativação administrativa de usuário sintético não substitui ensaios específicos de expiração cronológica, logout e revogação de sessão humana, nem interoperabilidade do ChatGPT no refresh/relogin. Nenhum token/conta real do proprietário foi revogado. Não houve deploy no SRV-IA, que permanece no runtime `53a6b14dae42bbe6cfd8eba9605468e7b28b54f7`. A versão de testes da `main` é mais recente que o SHA operacional, sem promoção automática. **PRE-RELEASE/NO-GO de publicação permanece.** [Recibo na issue #2](https://github.com/josemirmoura/portico-infinity/issues/2#issuecomment-6404763151).
 
 ## 1. Identificação inequívoca do candidato
 
@@ -37,7 +45,7 @@ Nenhuma aprovação pode ser transferida silenciosamente para um SHA ou instala�
 | Cenário | Evidência de laboratório já existente | Lacuna a validar |
 | --- | --- | --- |
 | CRUD, `chmod/chown` e negações /srv e /etc | [E2E Docker #38891810390](https://github.com/josemirmoura/portico-infinity/actions/runs/38891810390) | Cliente e conta reais do proprietário |
-| TLS, OAuth ZITADEL e MCP | [E2E OAuth #38893160988](https://github.com/josemirmoura/portico-infinity/actions/runs/38893160988) | Login interativo, expiração, refresh e revogação de sessão humana |
+| TLS, OAuth ZITADEL e MCP | [PR #85](https://github.com/josemirmoura/portico-infinity/pull/85) e [E2E humano #40243513297](https://github.com/josemirmoura/portico-infinity/actions/runs/40243513297): login browser, PKCE, refresh e desativação externa, **LAB PASS** | Logout e expiração de sessão, refresh/relogin no **ChatGPT real**; não revogar conta principal |
 | Reboot do **mesmo kernel guest** com OAuth/ZITADEL/Postgres/Broker/SQLite | [PR #56](https://github.com/josemirmoura/portico-infinity/pull/56) e [run #39982720921](https://github.com/josemirmoura/portico-infinity/actions/runs/39982720921) | Reboot operacional com janela e rollback específicos |
 | Máscaras de segredo em 1 milhão de entradas sintéticas | [PR #58](https://github.com/josemirmoura/portico-infinity/pull/58) | Cargas reais diferentes do hardware CI |
 | Identidade mutável em cópia de binário | [PR #63](https://github.com/josemirmoura/portico-infinity/pull/63) | Corridas residuais; nenhuma garantia de snapshot transacional |
@@ -65,7 +73,7 @@ Os resultados abaixo se referem **somente** ao host operacional e testes sintét
 | Revogação da delegação UAT Compose | Delegação temporária de uma pasta criada após aprovação SSH; removida ao final, `revoked_dynamic_delegations=1`, sem jobs dependentes; delegação anterior para Open WebUI preservada | **PASS** para root delegation, **não** prova revogação OAuth da identidade humana |
 | Estado final | `system.health.ok=true`, `audit_chain_ok=true`, `active_jobs=0`, `mode=scoped`, `full_enabled=false`; sem release estável | **PASS** no momento da coleta |
 
-**Gates ainda abertos (após reboot I7 aprovado):** renovação/refresh e revogação real da identidade humana, restauração funcional multi-host, desinstalação integral sem perdas, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
+**Gates ainda abertos (após reboot I7 e OAuth humano efêmero aprovados):** interoperabilidade do **cliente ChatGPT real** com refresh/relogin e testes de ciclo de vida da sessão (logout/expiração/revogação sem afetar conta principal), restauração funcional multi-host, desinstalação integral sem perdas, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
 
 ## 3. Roteiro mínimo de UAT pessoal, sem intervenção desnecessária
 
