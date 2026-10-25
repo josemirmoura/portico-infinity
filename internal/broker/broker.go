@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -1811,13 +1810,11 @@ func (b *Broker) mkdir(ctx context.Context, req wire.Request, fs *securefs.Manag
 		if !allowed { return deny(req.ID, "permission_denied", "shell workspace is outside authorized shell roots") }
 		runAs := b.Policy.Shell.RunAs
 		if runAs == "" { runAs = "vps-agent-exec" }
-		account, err := user.Lookup(runAs)
-		if err != nil { return deny(req.ID, "permission_denied", "configured shell account does not exist") }
-		shellUID, err = strconv.Atoi(account.Uid)
-		if err != nil { return deny(req.ID, "permission_denied", "shell account UID is invalid") }
-		shellGID, err = strconv.Atoi(account.Gid)
-		if err != nil || shellUID <= 0 || shellGID < 0 {
-			return deny(req.ID, "permission_denied", "shell workspace requires non-root policy account")
+		shellUID, shellGID, err = resolveHostShellAccount(ctx, runAs)
+		if err != nil {
+			// Fail closed. Do not replace the host identity with the Broker
+			// container's UID/GID or create/modify accounts automatically.
+			return deny(req.ID, "permission_denied", "configured host shell account unavailable")
 		}
 	}
 	requestHash, err := state.HashRequest(map[string]any{
