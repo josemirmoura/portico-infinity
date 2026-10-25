@@ -17,26 +17,7 @@ import (
 // Never infer ownership from container-local os/user.Lookup or user-controlled
 // UID/GID arguments. This helper only reads an account named in root-owned
 // shell.run_as policy; it never mutates host accounts.
-var shellAccountName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*package broker
-
-import (
-    "context"
-    "errors"
-    "regexp"
-    "strconv"
-    "strings"
-    "time"
-
-    "github.com/josemirmoura/mcp-vps-agent-gateway/internal/hostexec"
-)
-
-// A Pórtico Infinity Broker is a container: its /etc/passwd is NOT the host's
-// account database. The shell runner uses host systemd via hostexec, so the
-// workspace owner must be resolved in that same host identity namespace.
-// Never infer ownership from container-local os/user.Lookup or user-controlled
-// UID/GID arguments. This helper only reads an account named in root-owned
-// shell.run_as policy; it never mutates host accounts.
-)
+var shellAccountName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
 
 func resolveHostShellAccount(ctx context.Context, runAs string) (int, int, error) {
     if len(runAs) > 128 || !shellAccountName.MatchString(runAs) {
