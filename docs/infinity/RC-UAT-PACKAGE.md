@@ -2,6 +2,14 @@
 
 **Estado:** pré-lançamento. Em 24/10/2026 o proprietário autorizou e executou no SRV-IA o deploy operacional controlado do candidato identificado abaixo, com backup e rollback preparados. Isso **não** é GO para v1.0, não certifica todos os gates de UAT e não autoriza tag, GitHub Release, promoção adicional ou anúncio público. O SHA de referência é o código efetivamente implantado; mudanças posteriores somente documentais da `main` não mudam retroativamente a revisão instalada.
 
+## 0. Atualização posterior: UAT 080 aprovado em 25/10/2026
+
+**A tabela de 24/10 abaixo representa o candidato histórico e NÃO a versão operacional atual.** O proprietário executou, por SSH independente, o upgrade 080 aprovado: checkout de runtime **`53a6b14dae42bbe6cfd8eba9605468e7b28b54f7`** (PR #80), partindo do histórico `48d8c15978a675090a052b977b47abd1fbdd87f9`. Script pinado no commit `c8aceeb72b9f4b9713f629754bb29f82601f5c0c` (PR #82), com backup verificado e auditoria íntegra.
+
+O próprio ChatGPT validou `file.mkdir(for_shell=true)`, proprietário host UID 999/GID 987, escrita shell não-root, negações de pasta existente/raiz/fuga de escopo/symlink e cleanup completo. **Issue #77 fechada.** Inventário Compose real: quatro jobs terminalmente demonstrados, duas provas de cleanup `done` e duas ausentes, sem unidade ainda carregada; Issue #12 permanece aberta. [Registro detalhado, incluindo resultados e limitações](UAT-080-SRVIA-20261025.md).
+
+**Status geral permanece PRE-RELEASE/NO-GO de publicação** até revogação OAuth humana, reboot/recuperação autorizados, reversão/desinstalação multi-host, UAT humano e GO explícito. Não transportar evidências do candidato histórico automaticamente para um novo SHA.
+
 ## 1. Identificação inequívoca do candidato
 
 Antes de iniciar qualquer UAT, preencher a partir de GitHub e do host **sem divulgar segredos**:
