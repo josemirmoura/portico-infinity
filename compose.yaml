@@ -39,6 +39,15 @@ services:
       VPS_AGENT_INSTANCE_NAME: ${VPS_AGENT_INSTANCE_NAME:-vps-agent}
       VPS_AGENT_MAX_CONCURRENT_REQUESTS: ${VPS_AGENT_MAX_CONCURRENT_REQUESTS:-64}
     volumes:
+      # The Broker resolves shell.run_as for file.mkdir(for_shell=true).
+      # systemd runs the shell on the HOST, so the lookup must see host users.
+      # Mount only the host public account database, never shadow or credentials.
+      - type: bind
+        source: /etc/passwd
+        target: /etc/passwd
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: ${VPS_AGENT_SCOPE_ROOT:-/opt/my-app}
         target: /host${VPS_AGENT_SCOPE_ROOT:-/opt/my-app}
