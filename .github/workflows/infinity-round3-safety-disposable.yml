@@ -1,0 +1,116 @@
+name: infinity-round3-safety-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-compose-inventory.py'
+      - 'scripts/infinity-root-consumer-inventory.py'
+      - 'scripts/collect-infinity-compose-units.py'
+      - 'tests/scripts/test_infinity_compose_inventory.py'
+      - 'tests/test_infinity_root_consumer_inventory.py'
+      - 'tests/integration/infinity-compose-retention-systemd-e2e.py'
+      - 'internal/filecopyworker/**'
+      - 'internal/securefs/large_copy.go'
+      - '.github/workflows/infinity-round3-safety-disposable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  history-and-indirect-root:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Historic Compose evidence and root consumers, fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          test ! -e /srv/portico-infinity
+          python3 -m py_compile scripts/infinity-compose-inventory.py \
+            scripts/infinity-root-consumer-inventory.py \
+            scripts/collect-infinity-compose-units.py
+          python3 -m unittest -v tests/scripts/test_infinity_compose_inventory.py
+          python3 -m unittest discover -s tests -p test_infinity_root_consumer_inventory.py -v
+          python3 -m unittest -v tests/test_collect_infinity_compose_units.py
+          echo 'HISTORIC_COMPOSE_UNCERTAIN_MISSING_RECEIPTS_REVIEW_REQUIRED: PASS'
+      - name: Actual synthetic systemd receipt retention without touching real jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          sudo python3 tests/integration/infinity-compose-retention-systemd-e2e.py
+          echo 'TERMINAL_SYSTEMD_RETAINED_PRIVATE_AUDIT_FOREIGN_PRESERVED: PASS'
+      - name: Actual synthetic root consumer indirect exposure detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]{1,24}$ ]]
+          unit="portico-round3-root-ci-$GITHUB_RUN_ID"
+          scope="/opt/portico-round3-root-ci-$GITHUB_RUN_ID"
+          test ! -e "$scope"
+          trap 'sudo systemctl stop "$unit.service" >/dev/null 2>&1 || true; sudo systemctl reset-failed "$unit.service" >/dev/null 2>&1 || true; sudo rmdir "$scope" >/dev/null 2>&1 || true' EXIT
+          sudo install -d -o root -g root -m 0755 "$scope"
+          sudo systemd-run --unit="$unit" --no-block --quiet \
+            --description="Disposable Round3 root consumer fixture" \
+            --working-directory="$scope" --property=Type=oneshot \
+            --property=RemainAfterExit=yes -- /usr/bin/true
+          for attempt in $(seq 1 35); do
+            if test "$(systemctl show "$unit.service" -p SubState --value)" = exited; then break; fi
+            sleep 1
+          done
+          test "$(systemctl show "$unit.service" -p SubState --value)" = exited
+          python3 scripts/infinity-root-consumer-inventory.py --scope /opt \
+            > "$RUNNER_TEMP/round3-root-inventory.json"
+          if python3 scripts/infinity-root-consumer-inventory.py --scope /opt --strict \
+             > "$RUNNER_TEMP/round3-root-inventory-strict.json"; then
+            echo 'missing mandatory root consumer denial' >&2; exit 1
+          else
+            test "$?" -eq 3
+          fi
+          python3 - "$RUNNER_TEMP/round3-root-inventory.json" "$unit.service" <<'PY'
+          import json,sys
+          data=json.load(open(sys.argv[1],encoding="utf8"))
+          matches=[row for row in data["findings"] if row["unit"]==sys.argv[2]]
+          assert len(matches)==1 and matches[0]["classification"]=="root_consumer_review"
+          assert "WorkingDirectory" in matches[0]["referencing_fields"]
+          assert data["status"]=="review_required"
+          print("SYNTHETIC_ROOT_SERVICE_CONSUMING_OPT_REQUIRES_REVIEW: PASS")
+          PY
+
+  multigib-copy-and-cancel:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      INFINITY_MULTIGIB_E2E: '1'
+      GOMEMLIMIT: 512MiB
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Synthetic >2 GiB verified copy, cancellation and no-replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
+          test ! -e /srv/portico-infinity
+          available="$(df -B1 --output=avail /tmp | tail -1 | tr -d ' ')"
+          test "$available" -ge 5368709120
+          go mod download
+          go test -count=1 -timeout=13m -v \
+            -run '^TestWorker(MultiGiBSparseCopy|LargeSparseCancellation)$' ./internal/filecopyworker
+          echo 'SPARSE_MULTIGIB_STREAMING_SHA_CANCEL_NO_PARTIAL_PUBLICATION: PASS'
