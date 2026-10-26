@@ -2,6 +2,12 @@
 
 **Estado:** fases 1 (backup) e 2 (remoção **local** condicionada ao backup) implementadas e testadas em ambiente descartável. **A desinstalação multi-host completa permanece pendente**, incluindo worker instalado no host e dependências VPS/WireGuard/DNS. Nunca executar em SRV-IA/VPS sem autorização específica do proprietário.
 
+## Ensaio adicional de recuperação funcional + remoção de ponte no mesmo runner descartável
+
+A [PR #89](https://github.com/josemirmoura/portico-infinity/pull/89) introduz o workflow `.github/workflows/infinity-joined-restore-edge-disposable.yml` para integrar procedimentos que antes tinham provas separadas. Na execução [#40248390484](https://github.com/josemirmoura/portico-infinity/actions/runs/40248390484) do commit `6cedcf037a47921332cddaae43d70ef80be2f87f`, o job **SUCCESS** verificou um PostgreSQL 16 real e um SQLite sintético, seguiu a disciplina de parada fria, backup privado root-only com SHA-256, restauração do volume em outro contêiner PostgreSQL e **consulta SQL funcional** de uma tabela restaurada. O SQLite restaurado foi aberto em modo somente leitura, com `PRAGMA integrity_check=ok` e registro preservado. Após prova independente, o desinstalador removeu apenas os recursos locais originais, preservando Postgres restaurado, processo da conta não-root preexistente, contêineres estrangeiros e arquivos de terceiros. A ponte HTTPS do **domínio lógico VPS** foi removida em outra etapa com confirmação independente, sem destruir a rede compartilhada `traefik-public`, Traefik/serviços estrangeiros ou a cópia restaurada.
+
+**Fronteira de segurança:** os dois domínios usam diretórios, projetos Compose e redes separados, mas são executados **no mesmo kernel GitHub-hosted**, não em dois hosts reais. A prova não restaura a aplicação ZITADEL nem demonstra novo login/refresh com PostgreSQL recuperado, nem testa remoção de WireGuard, UFW, DNS/TLS, máquinas reais ou credenciais produtivas. Não se deve executar os comandos de remoção aqui descritos no SRV-IA/VPS sem **autorização por host, janela, inventário e restauração previamente homologada**.
+
 ## Contrato e fronteiras
 
 O operador controla o ciclo de vida fora do MCP. Uma desinstalação completa precisa distinguir os seguintes domínios:
