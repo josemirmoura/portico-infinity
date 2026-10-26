@@ -149,11 +149,23 @@ jobs:
           (cd "$controller" && sudo docker compose -p portico-infinity up -d)
           container="$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
           test -n "$container"
-          for n in $(seq 1 60); do
-            if docker exec "$container" pg_isready -U infinity_ci -d infinity_lab -q; then break; fi
+          # pg_isready can briefly succeed during initdb's TEMPORARY server,
+          # before the final PostgreSQL listener is restarted by entrypoint.
+          # Require two successful SQL SELECTs separated by two seconds.
+          ready=0
+          for n in $(seq 1 90); do
+            if test "$(docker exec "$container" psql -At -U infinity_ci -d infinity_lab \
+                -c 'SELECT 1' 2>/dev/null || true)" = 1; then
+              sleep 2
+              if test "$(docker exec "$container" psql -At -U infinity_ci -d infinity_lab \
+                  -c 'SELECT 1' 2>/dev/null || true)" = 1; then
+                ready=1; break
+              fi
+            fi
             sleep 1
           done
-          docker exec "$container" pg_isready -U infinity_ci -d infinity_lab -q
+          test "$ready" = 1
+          echo 'REAL_POSTGRES_FINAL_LISTENER_SQL_READY: PASS'
           docker exec "$container" psql -v ON_ERROR_STOP=1 -U infinity_ci -d infinity_lab \
             -c 'CREATE TABLE state_proof (id integer PRIMARY KEY, marker text NOT NULL);' \
             -c "INSERT INTO state_proof VALUES (1,'auth-restore-ci-fixture');" >/dev/null
