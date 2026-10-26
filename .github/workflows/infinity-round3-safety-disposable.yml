@@ -45,7 +45,8 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test "$GITHUB_EVENT_NAME" = pull_request
           test "$GITHUB_REPOSITORY" = josemirmoura/portico-infinity
-          sudo python3 tests/integration/infinity-compose-retention-systemd-e2e.py
+          sudo --preserve-env=GITHUB_RUN_ID,RUNNER_ENVIRONMENT,GITHUB_EVENT_NAME,GITHUB_REPOSITORY \
+            python3 tests/integration/infinity-compose-retention-systemd-e2e.py
           echo 'TERMINAL_SYSTEMD_RETAINED_PRIVATE_AUDIT_FOREIGN_PRESERVED: PASS'
       - name: Actual synthetic root consumer indirect exposure detection
         shell: bash
