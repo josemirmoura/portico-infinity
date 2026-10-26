@@ -130,6 +130,28 @@ class InventoryTests(unittest.TestCase):
             result = inventory.inspect(self.db, 100)
         self.assertEqual(result["counts"]["receipt_missing"], 1)
         self.assertEqual(result["counts"]["ledger_terminal_proven"], 1)
+        self.assertEqual(result["result"], "REVIEW_REQUIRED")
+
+    def test_historical_terminal_job_without_cleanup_receipt_needs_review(self):
+        # A systemd unit being absent is not proof the old retention
+        # cleanup successfully archived terminal evidence.
+        self.job(state="done", exit_code=0, receipt=None)
+        before = hashlib.sha256(self.db.read_bytes()).hexdigest()
+        with patch.object(inventory, "systemctl", side_effect=self.fake_systemctl) as calls:
+            result = inventory.inspect(self.db, 100)
+        self.assertEqual(result["counts"]["ledger_terminal_proven"], 1)
+        self.assertEqual(result["counts"]["unit_absent"], 1)
+        self.assertEqual(result["counts"]["receipt_missing"], 1)
+        self.assertEqual(result["result"], "REVIEW_REQUIRED")
+        self.assertEqual(before, hashlib.sha256(self.db.read_bytes()).hexdigest())
+        self.assertTrue(all(x.args[0] in ("show", "list-units") for x in calls.call_args_list))
+
+    def test_done_receipt_but_uncertain_job_cannot_be_accepted(self):
+        self.job(state="reconcile_required", exit_code=None, receipt="done")
+        with patch.object(inventory, "systemctl", side_effect=self.fake_systemctl):
+            result = inventory.inspect(self.db, 100)
+        self.assertEqual(result["counts"]["ledger_reconcile_required"], 1)
+        self.assertEqual(result["result"], "REVIEW_REQUIRED")
 
     def test_db_symlink_denied(self):
         alias = Path(self.temp.name) / "alias.db"

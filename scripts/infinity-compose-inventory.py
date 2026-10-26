@@ -147,8 +147,9 @@ def inspect(db_path: Path, limit: int) -> dict:
     review = truncated or any(counts[x] for x in (
         "invalid_unit", "ledger_active", "ledger_reconcile_required",
         "ledger_other_or_unproven", "unit_active_or_transition",
-        "unit_ambiguous", "unit_query_failed", "receipt_pending",
-        "receipt_mismatch", "receipt_invalid", "receipt_done_unit_not_absent",
+        "unit_ambiguous", "unit_query_failed", "receipt_missing",
+        "receipt_pending", "receipt_mismatch", "receipt_invalid",
+        "receipt_done_unit_not_absent",
         "orphan_loaded_without_paged_ledger",
     ))
     return {
