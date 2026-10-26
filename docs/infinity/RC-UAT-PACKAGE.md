@@ -32,6 +32,14 @@ A [PR #87](https://github.com/josemirmoura/portico-infinity/pull/87), merge `50f
 
 **Limites deliberados:** encerramento **administrativo da sessão SSO** não equivale a logout iniciado pelo navegador em `/oidc/v1/end_session`. A prova não demonstrou expiração da sessão browser pela duração máxima de SSO nem política anti-replay de token de refresh rotacionado. Também não prova a sessão real do cliente ChatGPT e **não revogou qualquer identidade produtiva**. Não alterou SRV-IA, VPS, serviços ou credenciais reais. O escopo pós-login no ChatGPT e o UAT/GO pessoal continuam pendentes. **PRE-RELEASE/NO-GO mantém-se.**
 
+## 0E. Restauração funcional fria e desmontagem de dois domínios lógicos no GitHub | LAB PASS em 26/10/2026
+
+A [PR #89](https://github.com/josemirmoura/portico-infinity/pull/89) acrescenta um E2E que **reutiliza os scripts reais do produto** para encadear, no **mesmo runner GitHub-hosted Ubuntu descartável**, duas áreas lógicas: controlador `/srv/portico-infinity` (SRV-IA simulado) e ponte HTTPS `/opt/portico-infinity-edge` (VPS simulada), com projetos Docker Compose e redes distintas. **Não são duas máquinas físicas nem um teste WireGuard real**.
+
+No head testado `6cedcf037a47921332cddaae43d70ef80be2f87f`, o [workflow integrado #40248390484](https://github.com/josemirmoura/portico-infinity/actions/runs/40248390484) concluiu **SUCCESS**: PostgreSQL 16 real com SQL de teste, SQLite de auditoria de teste, backup frio de volume e controlador com verificação de SHA-256, restauração num volume Docker **independente**, novo Postgres iniciado com a consulta SQL original confirmada e `PRAGMA integrity_check=ok` no SQLite recuperado. Após prova funcional, a remoção local da instância/volumes originais exigiu confirmação baseada no hash e preservou o banco restaurado, usuário/processo preexistente e a ponte externa. Em etapa separada, a ponte exclusiva foi desativada e removida mediante confirmação, preservando a rede `traefik-public`, dois serviços estrangeiros, arquivos de configuração e o banco restaurado. Tentativas sem confirmação foram negadas.
+
+**Resultado específico: LAB PASS de backup frio e recuperação PostgreSQL/SQLite + cadeia de remoção local e ponte independente**, sem intervenção na VPS ou no SRV-IA. **Limites bloqueadores para aceite completo:** não levantou ZITADEL/Login V2 nem refez login/autorização após o restore; não testou dois kernels/hosts físicos com canal WireGuard, DNS/TLS/UFW nem reversão real em produção. O workflow demonstra isolamento de recursos, não autoriza decommission distribuído produtivo. O candidato final deve permanecer **PRE-RELEASE/NO-GO** até UAT, restauração funcional de identidade em laboratório apropriado e aprovação humana.
+
 ## 1. Identificação inequívoca do candidato
 
 Antes de iniciar qualquer UAT, preencher a partir de GitHub e do host **sem divulgar segredos**:
@@ -60,7 +68,7 @@ Nenhuma aprovação pode ser transferida silenciosamente para um SHA ou instala�
 | Checkpoint terminal em falha de inicialização | [PR #65](https://github.com/josemirmoura/portico-infinity/pull/65), 12/12 workflows SUCCESS | Deploy, UAT e observação real do operador |
 | Revogação antes do commit da cópia | [PR #64](https://github.com/josemirmoura/portico-infinity/pull/64) | Marcar PASS somente após CI integral e merge da revisão combinada |
 | Inventário de consumidores root de /opt | [PR #62](https://github.com/josemirmoura/portico-infinity/pull/62) | Referências indiretas e serviços reais requerem revisão do operador |
-| Desinstalação local isolada e componentes host/VPS | [PRs #45 a #49](https://github.com/josemirmoura/portico-infinity/pulls) e [FULL_UNINSTALL.md](FULL_UNINSTALL.md) | Restauração funcional integral de identidade e desmontagem multi-host exclusiva, com autorização |
+| Desinstalação local isolada e componentes host/VPS | [PRs #45 a #49](https://github.com/josemirmoura/portico-infinity/pulls), [PR #89](https://github.com/josemirmoura/portico-infinity/pull/89) e [FULL_UNINSTALL.md](FULL_UNINSTALL.md): PostgreSQL/SQLite restaurados com consulta real e edge removida no mesmo runner efêmero | Restore completo ZITADEL/Login/OAuth e desmontagem em dois hosts distintos com rede, chaves e autorização específica |
 
 **Interpretação:** o ambiente descartável prova mecanismos específicos, e os resultados não devem ser generalizados para a infraestrutura do proprietário.
 
@@ -81,7 +89,7 @@ Os resultados abaixo se referem **somente** ao host operacional e testes sintét
 | Revogação da delegação UAT Compose | Delegação temporária de uma pasta criada após aprovação SSH; removida ao final, `revoked_dynamic_delegations=1`, sem jobs dependentes; delegação anterior para Open WebUI preservada | **PASS** para root delegation, **não** prova revogação OAuth da identidade humana |
 | Estado final | `system.health.ok=true`, `audit_chain_ok=true`, `active_jobs=0`, `mode=scoped`, `full_enabled=false`; sem release estável | **PASS** no momento da coleta |
 
-**Gates ainda abertos (após reboot I7 e OAuth humano efêmero + expiração real e encerramento administrativo de sessão aprovados):** interoperabilidade do **cliente ChatGPT real** com refresh/relogin, logout **iniciado pelo navegador**, vencimento de SSO e replay de refresh token conforme política configurada; restauração funcional multi-host, desinstalação integral sem perdas, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
+**Gates ainda abertos (após reboot I7, OAuth humano e laboratório integrado de backup/restore aprovados):** interoperabilidade do **cliente ChatGPT real** com refresh/relogin, logout **iniciado pelo navegador**, vencimento de SSO e replay de refresh conforme política configurada; **restauração funcional do ZITADEL/Login/OAuth com identidade realista em laboratório**, homologação física multi-host e desinstalação autorizada de WireGuard/DNS/TLS/UFW, revisão de consumidores root de `/opt`, benchmark grande no ambiente alvo, UAT pessoal completo e GO/NO-GO. Sem nova autorização específica, **não** reiniciar o SRV-IA, revogar identidades reais, desinstalar, mexer na VPS ou publicar a v1.0.
 
 ## 3. Roteiro mínimo de UAT pessoal, sem intervenção desnecessária
 
