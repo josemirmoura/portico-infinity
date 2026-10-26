@@ -1,0 +1,308 @@
+name: infinity-joined-restore-edge-disposable
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/infinity-uninstall-backup.py'
+      - 'scripts/infinity-uninstall-local.py'
+      - 'tests/scripts/test_infinity_uninstall_local.py'
+      - 'scripts/infinity-lifecycle.py'
+      - 'tests/scripts/test_infinity_uninstall_backup.py'
+      - 'scripts/infinity-executor-account-audit.py'
+      - 'tests/scripts/test_infinity_executor_account_audit.py'
+      - '.github/workflows/infinity-joined-restore-edge-disposable.yml'
+      - 'deploy/infinity-vps-edge/**'
+
+permissions:
+  contents: read
+
+jobs:
+  joined-restore-and-edge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - name: Synthetic negative tests and Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          python3 -m py_compile scripts/infinity-uninstall-backup.py
+          python3 -m unittest -v tests/scripts/test_infinity_uninstall_backup.py
+          python3 -m py_compile scripts/infinity-uninstall-local.py
+          python3 -m unittest -v tests/scripts/test_infinity_uninstall_local.py
+          python3 -m py_compile scripts/infinity-executor-account-audit.py
+          sudo python3 -m unittest -v tests/scripts/test_infinity_executor_account_audit.py
+      - name: Functional cold PostgreSQL + SQLite recovery, local uninstall and independent edge removal
+        shell: bash
+        env:
+          INFINITY_PUBLIC_DOMAIN: ci.example.invalid
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test ! -e /srv/portico-infinity
+          test ! -e /var/backups/portico-infinity
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          # The installer requires an EXISTING non-root account. This one is
+          # synthetic and belongs to the disposable runner, not to Infinity.
+          executor="infinity-ci-exec"
+          ! id "$executor" >/dev/null 2>&1
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin "$executor"
+          sleep_pid=""
+          lab="/var/backups/portico-infinity"
+          controller="/srv/portico-infinity"
+          job="runner-$GITHUB_RUN_ID"
+          edge="/opt/portico-infinity-edge"
+          recovered="infinity-recovered-$GITHUB_RUN_ID"
+          recovered_volume="infinity-recovery-$GITHUB_RUN_ID"
+          foreign_marker="/tmp/infinity-foreign-guard-$GITHUB_RUN_ID"
+          [[ "$job" =~ ^runner-[0-9]{1,24}$ ]]
+          test ! -e "$edge"
+          test ! -e /etc/wireguard/wg-infinity.conf
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity-edge)"
+          if docker network inspect traefik-public >/dev/null 2>&1; then
+            echo 'unexpected pre-existing shared network in disposable runner' >&2; exit 1
+          fi
+          cleanup() {
+            set +e
+            if test -n "$sleep_pid"; then sudo kill "$sleep_pid" >/dev/null 2>&1 || true; fi
+            sudo pkill -u "$executor" >/dev/null 2>&1 || true
+            sudo userdel "$executor" >/dev/null 2>&1 || true
+            if test -d "$controller"; then
+              (cd "$controller" && sudo docker compose -p portico-infinity down -v --remove-orphans) >/dev/null 2>&1 || true
+            fi
+            docker rm -f "$recovered" unrelated-full-backup-fixture \
+              foreign-edge-parent-ci foreign-edge-service-ci >/dev/null 2>&1 || true
+            docker volume rm "$recovered_volume" >/dev/null 2>&1 || true
+            if test -d "$edge"; then
+              (cd "$edge" && sudo --preserve-env=INFINITY_PUBLIC_DOMAIN docker compose \
+                -p portico-infinity-edge down) >/dev/null 2>&1 || true
+            fi
+            docker network rm traefik-public >/dev/null 2>&1 || true
+            sudo rm -rf -- "$edge"
+            rm -f -- "$foreign_marker"
+            sudo rm -rf -- "/tmp/infinity-restore-$GITHUB_RUN_ID"
+            sudo rm -rf -- "$controller"
+            sudo rm -rf -- "$lab"
+          }
+          trap cleanup EXIT
+
+          # Logical VPS domain on the same *disposable* kernel.
+          # Distinct ownership, Compose project, proxy network and foreign
+          # consumers; NOT a literal two-host WireGuard teardown.
+          test "$(stat -c %u:%g /opt)" = "0:0"
+          sudo chmod go-w /opt
+          sudo install -d -o root -g root -m 0755 "$edge"
+          for name in compose.yaml infinity-upstreams.yml infinity-edge-lifecycle.py; do
+            sudo install -o root -g root -m 0644 \
+              "deploy/infinity-vps-edge/$name" "$edge/$name"
+          done
+          edge_hash="$(sudo sha256sum "$edge/compose.yaml" "$edge/infinity-upstreams.yml")"
+          docker network create traefik-public >/dev/null
+          docker run -d --name foreign-edge-parent-ci --network traefik-public \
+            alpine:3.21 sleep 3600 >/dev/null
+          docker run -d --name foreign-edge-service-ci --network traefik-public \
+            alpine:3.21 sleep 3600 >/dev/null
+          network_id="$(docker network inspect traefik-public --format '{{.Id}}')"
+          (cd "$edge" && sudo --preserve-env=INFINITY_PUBLIC_DOMAIN docker compose \
+            -p portico-infinity-edge up -d)
+          edge_cid="$(docker ps -q --filter label=com.docker.compose.project=portico-infinity-edge)"
+          test -n "$edge_cid"
+          test "$(docker inspect "$edge_cid" -f '{{.State.Running}}')" = true
+          printf 'foreign-data-unchanged\n' > "$foreign_marker"
+          foreign_hash="$(sha256sum "$foreign_marker" | cut -d' ' -f1)"
+          echo 'LOGICAL_VPS_EDGE_AND_FOREIGN_CONSUMERS_PREPARED: PASS'
+
+          sudo install -d -o root -g root -m 0755 "$controller/scripts"
+          sudo install -d -o root -g root -m 0755 "$controller/config"
+          sudo install -d -o root -g root -m 0700 "$lab"
+          sudo install -o root -g root -m 0644 scripts/infinity-lifecycle.py "$controller/scripts/infinity-lifecycle.py"
+          sudo install -o root -g root -m 0644 scripts/infinity-uninstall-backup.py "$controller/scripts/infinity-uninstall-backup.py"
+          sudo install -o root -g root -m 0644 scripts/infinity-uninstall-local.py "$controller/scripts/infinity-uninstall-local.py"
+          sudo install -o root -g root -m 0644 scripts/infinity-executor-account-audit.py "$controller/scripts/infinity-executor-account-audit.py"
+          printf 'version: 1\nshell:\n  run_as: %s\n' "$executor" | sudo tee "$controller/config/policy.yaml" >/dev/null
+          sudo chmod 0600 "$controller/config/policy.yaml"
+          sudo -u "$executor" /bin/sleep 200 &
+          sleep_pid=$!
+          sleep 0.2
+          sudo pgrep -u "$executor" -x sleep >/dev/null
+          sudo tee "$controller/compose.yaml" >/dev/null <<'YAML'
+          name: portico-infinity
+          services:
+            zitadel-postgres:
+              image: postgres:16-alpine
+              environment:
+                POSTGRES_DB: infinity_lab
+                POSTGRES_USER: infinity_ci
+                POSTGRES_PASSWORD: local-ci-synthetic-password
+              volumes:
+                - zitadel-postgres-data:/var/lib/postgresql/data
+          volumes:
+            zitadel-postgres-data:
+          YAML
+          sudo chown root:root "$controller/compose.yaml"
+          sudo chmod 0600 "$controller/compose.yaml"
+          sudo sh -c "printf 'synthetic-only-ci-private-config\n' > '$controller/.env'"
+          sudo chmod 0600 "$controller/.env"
+          (cd "$controller" && sudo docker compose -p portico-infinity up -d)
+          container="$(docker ps -q --filter label=com.docker.compose.project=portico-infinity)"
+          test -n "$container"
+          for n in $(seq 1 60); do
+            if docker exec "$container" pg_isready -U infinity_ci -d infinity_lab -q; then break; fi
+            sleep 1
+          done
+          docker exec "$container" pg_isready -U infinity_ci -d infinity_lab -q
+          docker exec "$container" psql -v ON_ERROR_STOP=1 -U infinity_ci -d infinity_lab \
+            -c 'CREATE TABLE state_proof (id integer PRIMARY KEY, marker text NOT NULL);' \
+            -c "INSERT INTO state_proof VALUES (1,'auth-restore-ci-fixture');" >/dev/null
+          test "$(docker exec "$container" psql -At -U infinity_ci -d infinity_lab \
+            -c 'SELECT marker FROM state_proof WHERE id=1')" = "auth-restore-ci-fixture"
+          sudo install -d -o root -g root -m 0700 "$controller/state"
+          sudo python3 - "$controller/state/state.db" <<'PY'
+          import sqlite3,sys
+          db=sqlite3.connect(sys.argv[1])
+          db.execute("CREATE TABLE audit (sequence INTEGER PRIMARY KEY, event TEXT NOT NULL)")
+          db.execute("INSERT INTO audit VALUES (1,'synthetic-ci-boot-and-token')")
+          db.commit(); db.close()
+          PY
+          sudo chmod 0600 "$controller/state/state.db"
+          docker run -d --name unrelated-full-backup-fixture alpine:3.21 sleep 3600
+          (cd "$controller" && sudo docker compose -p portico-infinity stop)
+
+          cd "$controller"
+          sudo python3 scripts/infinity-executor-account-audit.py --inspect > /tmp/infinity-account-readonly.json
+          python3 - <<'PY'
+          import json
+          a=json.load(open('/tmp/infinity-account-readonly.json'))
+          assert a['username']=='infinity-ci-exec'
+          assert a['safe_automatic_account_deletion'] is False
+          assert a['account_created_by_infinity'] is False
+          assert a['live_process_observation']['executor_uid_processes_seen'] >= 1
+          print('EXISTING_EXECUTOR_ACCOUNT_INVENTORY_AND_ACTIVE_FOREIGN_PROCESS: PASS')
+          PY
+          sudo python3 scripts/infinity-uninstall-backup.py --inspect >/tmp/infinity-private-inspect.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('/tmp/infinity-private-inspect.json'))
+          assert x['destruction_authorized'] is False
+          assert x['private_volumes']==['portico-infinity_zitadel-postgres-data']
+          assert len(x['external_manual_gates']) >= 4
+          print('PRIVATE FULL-UNINSTALL INVENTORY ONLY: PASS')
+          PY
+          if sudo python3 scripts/infinity-uninstall-backup.py --backup "$job" >/dev/null 2>&1; then
+            echo "backup without owner confirmation was accepted" >&2
+            exit 1
+          fi
+          sudo python3 scripts/infinity-uninstall-backup.py --backup "$job" \
+            --confirm BACKUP-INFINITY-BEFORE-UNINSTALL
+          sudo python3 scripts/infinity-uninstall-backup.py --verify "$job"
+          archive="$lab/infinity-uninstall-$job.tar"
+          test "$(sudo stat -c %a "$archive")" = 600
+          test "$(sudo stat -c %a "$archive.json")" = 600
+          restore="/tmp/infinity-restore-$GITHUB_RUN_ID"
+          sudo install -d -o root -g root -m 0700 "$restore"
+          sudo tar -xf "$archive" -C "$restore"
+          sudo grep -qx 'synthetic-only-ci-private-config' "$restore/controller/.env"
+          sudo test -s "$restore/volumes/portico-infinity_zitadel-postgres-data/PG_VERSION"
+          sudo grep -qx '16' "$restore/volumes/portico-infinity_zitadel-postgres-data/PG_VERSION"
+          sudo python3 - "$restore/controller/state/state.db" <<'PY'
+          import sqlite3,sys
+          db=sqlite3.connect(f"file:{sys.argv[1]}?mode=ro",uri=True)
+          assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+          assert db.execute("SELECT event FROM audit WHERE sequence=1").fetchone()[0]=="synthetic-ci-boot-and-token"
+          db.close()
+          print("COLD_SQLITE_AUDIT_RESTORED_FUNCTIONALLY: PASS")
+          PY
+          # Cold restore to an INDEPENDENT named Docker volume.
+          # The original DB remains stopped; access credentials are synthetic.
+          docker volume create "$recovered_volume" >/dev/null
+          docker run --rm \
+            --mount "type=bind,src=$restore/volumes/portico-infinity_zitadel-postgres-data,dst=/from,readonly" \
+            --mount "type=volume,src=$recovered_volume,dst=/to" \
+            alpine:3.21 sh -c 'cp -a /from/. /to/'
+          docker run -d --name "$recovered" \
+            -e POSTGRES_DB=infinity_lab -e POSTGRES_USER=infinity_ci \
+            -e POSTGRES_PASSWORD=local-ci-synthetic-password \
+            -v "$recovered_volume:/var/lib/postgresql/data" \
+            postgres:16-alpine >/dev/null
+          for n in $(seq 1 60); do
+            if docker exec "$recovered" pg_isready -U infinity_ci -d infinity_lab -q; then break; fi
+            sleep 1
+          done
+          docker exec "$recovered" pg_isready -U infinity_ci -d infinity_lab -q
+          test "$(docker exec "$recovered" psql -At -U infinity_ci -d infinity_lab \
+            -c 'SELECT marker FROM state_proof WHERE id=1')" = 'auth-restore-ci-fixture'
+          echo 'REAL_POSTGRES_16_COLD_VOLUME_RESTORED_SQL_SELECT: PASS'
+          test "$(docker inspect unrelated-full-backup-fixture -f '{{.State.Running}}')" = true
+          test -n "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          echo 'ISOLATED FULL-UNINSTALL VERIFIED BACKUP + REAL POSTGRES AND SQLITE RECOVERY: PASS'
+          # Reproves that the backup script NEVER removes the original volume.
+          test -n "$(docker volume ls -q --filter label=com.docker.compose.project=portico-infinity)"
+          # Destruction requires three independent, exact conditions:
+          # stopped verified owned resources, existing checksum-verified backup,
+          # and an operator attestation of the successfully tested restore.
+          sudo python3 scripts/infinity-uninstall-local.py \
+            --backup-label "$job" --dry-run >/tmp/infinity-local-removal-plan.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/infinity-local-removal-plan.json'))
+          assert d['automatic_deletion'] is False
+          assert d['workspaces_preserved'].startswith('/opt')
+          assert len(d['external_assets_preserved']) >= 4
+          print('DIGEST-BOUND LOCAL REMOVAL DRY RUN: PASS')
+          PY
+          if sudo python3 scripts/infinity-uninstall-local.py --backup-label "$job" \
+             --remove-local --confirm BAD --restore-attested BAD >/dev/null 2>&1; then
+            echo "unauthorized local uninstall was accepted" >&2; exit 1
+          fi
+          test -d "$controller"
+          HASH="$(sudo python3 - "$archive.json" <<'PY'
+          import json,sys
+          print(json.load(open(sys.argv[1]))['sha256'][:20])
+          PY
+          )"
+          [[ "$HASH" =~ ^[0-9a-f]{20}$ ]]
+          sudo python3 scripts/infinity-uninstall-local.py \
+             --backup-label "$job" --remove-local \
+             --confirm "REMOVE-LOCAL-INFINITY-$HASH" \
+             --restore-attested "RESTORE-TESTED-$HASH"
+          cd "$GITHUB_WORKSPACE"
+          test ! -e "$controller"
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity)"
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=portico-infinity)"
+          test "$(docker inspect unrelated-full-backup-fixture -f '{{.State.Running}}')" = true
+          test -n "$(id -u "$executor")"
+          sudo pgrep -u "$executor" -x sleep >/dev/null
+          sudo test -f "$archive"
+          sudo grep -q 'local-resources-removed' "$lab/infinity-uninstall-$job.local-intent.json"
+          # The recovered DB and independent logical VPS continue working
+          # even after Infinity's original controller/volumes are removed.
+          test "$(docker exec "$recovered" psql -At -U infinity_ci -d infinity_lab \
+            -c 'SELECT marker FROM state_proof WHERE id=1')" = 'auth-restore-ci-fixture'
+          test "$(docker inspect "$edge_cid" -f '{{.State.Running}}')" = true
+          echo 'ISOLATED FULL LOCAL REMOVAL AFTER FUNCTIONAL PG_AND_SQLITE RESTORE: PASS'
+          # External/foreign components survive the isolated local teardown.
+          (cd "$edge" && sudo python3 infinity-edge-lifecycle.py --dry-run \
+            > "/tmp/infinity-edge-plan-$GITHUB_RUN_ID.json")
+          if (cd "$edge" && sudo python3 infinity-edge-lifecycle.py --remove-bridge) \
+              >/dev/null 2>&1; then
+            echo 'edge removal without independent confirmation accepted' >&2; exit 1
+          fi
+          (cd "$edge" && sudo python3 infinity-edge-lifecycle.py \
+            --deactivate --confirm DEACTIVATE-INFINITY-EDGE)
+          (cd "$edge" && sudo python3 infinity-edge-lifecycle.py \
+            --remove-bridge --confirm REMOVE-INFINITY-EDGE-BRIDGE)
+          test -z "$(docker ps -aq --filter label=com.docker.compose.project=portico-infinity-edge)"
+          test "$(docker network inspect traefik-public --format '{{.Id}}')" = "$network_id"
+          test "$(docker inspect foreign-edge-parent-ci -f '{{.State.Running}}')" = true
+          test "$(docker inspect foreign-edge-service-ci -f '{{.State.Running}}')" = true
+          test "$(sudo sha256sum "$edge/compose.yaml" "$edge/infinity-upstreams.yml")" = "$edge_hash"
+          test "$(sha256sum "$foreign_marker" | cut -d' ' -f1)" = "$foreign_hash"
+          test ! -e /etc/wireguard/wg-infinity.conf
+          test "$(docker exec "$recovered" psql -At -U infinity_ci -d infinity_lab \
+            -c 'SELECT marker FROM state_proof WHERE id=1')" = 'auth-restore-ci-fixture'
+          echo 'ISOLATED_TWO_LOGICAL_DOMAINS_LOCAL_AND_EDGE_DECOMMISSION_FOREIGN_PRESERVED: PASS'
+          echo 'EXISTING_RUN_AS_USER_AND_ITS_INDEPENDENT_PROCESS_PRESERVED_AFTER_UNINSTALL: PASS'
+          # No actual VPS/SRV-IA, WireGuard, DNS, UFW or TLS key is touched.
