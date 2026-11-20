@@ -15,9 +15,12 @@ var ErrScanLimit = errors.New("sensitive-path scan exceeded safety limit")
 
 func ProtectedName(path string) bool {
 	clean := filepath.Clean(path)
+	for _, marker := range []string{"/.config/gh/", "/.config/gcloud/", "/.config/rclone/"} {
+		if strings.Contains(clean+"/", marker) { return true }
+	}
 	for _, name := range strings.Split(clean, string(filepath.Separator)) {
 		switch name {
-		case ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config",
+		case ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker",
 			".netrc", ".npmrc", ".git-credentials", ".bashrc", ".bash_profile",
 			".profile", ".zshrc", "id_rsa", "id_ed25519", "authorized_keys", "known_hosts":
 			return true
