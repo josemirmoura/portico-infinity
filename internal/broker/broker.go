@@ -1279,6 +1279,12 @@ func (b *Broker) activeRootDelegations(ctx context.Context, subject string) ([]s
 	if b.State == nil || subject == "" {
 		return nil, nil
 	}
+	// Community historically has no Infinity physical ceiling. Preserve its
+	// existing behavior; a configured (even malformed) Infinity ceiling fails closed.
+	_, pluralConfigured := os.LookupEnv("VPS_AGENT_PHYSICAL_SCOPE_ROOTS")
+	if !pluralConfigured && os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT") == "" {
+		return b.State.ListActiveRootDelegations(ctx, subject)
+	}
 	roots, err := policy.PhysicalRoots()
 	if err != nil { return nil, err }
 	delegations, err := b.State.ListActiveRootDelegations(ctx, subject)

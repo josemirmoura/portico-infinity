@@ -36,11 +36,14 @@ func eligibleWebApproval(a state.Approval, expectedSubject string) bool {
 		return false
 	}
 	if a.Kind == "root" {
-		ceilings, err := policy.PhysicalRoots()
-		if err != nil { return false }
-		for _, ceiling := range ceilings {
-			if filepath.Clean(a.Resource) == filepath.Clean(ceiling) {
-				return false // ceiling-wide grants require interactive operator CLI
+		_, pluralConfigured := os.LookupEnv("VPS_AGENT_PHYSICAL_SCOPE_ROOTS")
+		if pluralConfigured || os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT") != "" {
+			ceilings, err := policy.PhysicalRoots()
+			if err != nil { return false }
+			for _, ceiling := range ceilings {
+				if filepath.Clean(a.Resource) == filepath.Clean(ceiling) {
+					return false // ceiling-wide grants require interactive operator CLI
+				}
 			}
 		}
 		return filepath.IsAbs(a.Resource) &&
