@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/hostexec"
+	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/policy"
 )
 
 // infinityShellWorkspaceRoots limits a non-root Infinity shell to the one
@@ -25,17 +26,18 @@ func infinityShellWorkspaceRoots(cwd string, isolated bool, readRoots, writeRoot
 	if protectedRoot == "" || !isolated {
 		return readRoots, writeRoots, nil
 	}
-	physical := os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT")
-	if !filepath.IsAbs(physical) || physical == "/" || filepath.Clean(physical) != physical {
-		return nil, nil, errors.New("Infinity shell physical scope must be an explicit canonical directory")
-	}
-	// Reject a misconfigured ceiling that could encompass (or sit inside)
-	// Infinity's protected controller, regardless of file-policy claims.
-	if pathWithinRoot(physical, protectedRoot) || pathWithinRoot(protectedRoot, physical) {
-		return nil, nil, errors.New("Infinity shell physical scope overlaps the protected controller")
+	ceilings, err := policy.PhysicalRoots()
+	if err != nil { return nil, nil, err }
+	physical := ""
+	for _, ceiling := range ceilings {
+		if !filepath.IsAbs(ceiling) || ceiling == "/" || filepath.Clean(ceiling) != ceiling ||
+			pathWithinRoot(ceiling, protectedRoot) || pathWithinRoot(protectedRoot, ceiling) {
+			return nil, nil, errors.New("Infinity shell physical scope invalid or overlaps the protected controller")
+		}
+		if pathWithinRoot(ceiling, cwd) { physical = ceiling }
 	}
 	if !filepath.IsAbs(cwd) || filepath.Clean(cwd) != cwd ||
-		cwd == physical || !pathWithinRoot(physical, cwd) {
+		physical == "" || cwd == physical {
 		return nil, nil, errors.New("Infinity shell requires a project directory strictly below the configured physical scope")
 	}
 

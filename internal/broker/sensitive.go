@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/hostexec"
+	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/policy"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/sensitive"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/state"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/wire"
@@ -118,9 +119,9 @@ func (b *Broker) guardSensitiveRequest(ctx context.Context, req wire.Request) *w
 	}
 	var checks []check
 	switch req.Tool {
-	case "file.read", "file.read_test", "file.hash":
+	case "file.read", "file.read_test", "file.hash", "file.list", "file.stat":
 		checks = append(checks, check{path: req.Resource})
-	case "file.write", "file.write_test", "file.patch", "file.chmod", "file.chown":
+	case "file.write", "file.write_test", "file.patch", "file.chmod", "file.chown", "file.mkdir":
 		checks = append(checks, check{path: req.Resource, write: true})
 	case "file.remove":
 		checks = append(checks, check{path: req.Resource, write: true})
@@ -243,8 +244,8 @@ func (b *Broker) sensitiveShellMasks(ctx context.Context, subject string, roots 
 }
 
 func (b *Broker) discoverScope(ctx context.Context, req wire.Request) wire.Response {
-	physical := filepath.Clean(os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT"))
-	if physical == "." || physical == "" || !filepath.IsAbs(physical) {
+	physicalRoots, rootsErr := policy.PhysicalRoots()
+	if rootsErr != nil {
 		return deny(req.ID, "scope_unavailable", "physical filesystem ceiling is not configured")
 	}
 	var in struct {
@@ -258,32 +259,28 @@ func (b *Broker) discoverScope(ctx context.Context, req wire.Request) wire.Respo
 	if in.Limit <= 0 || in.Limit > 200 {
 		in.Limit = 200
 	}
-	entries, err := os.ReadDir(hostexec.Path(physical))
-	if err != nil {
-		return deny(req.ID, "scope_unavailable", err.Error())
-	}
 	readRoots, writeRoots, err := b.effectiveFileRoots(ctx, req.Subject)
 	if err != nil {
 		return deny(req.ID, "state_error", err.Error())
 	}
 	dirs := make([]map[string]any, 0)
-	for _, entry := range entries {
-		if len(dirs) >= in.Limit {
-			break
+	for _, physical := range physicalRoots {
+		entries, err := os.ReadDir(hostexec.Path(physical))
+		if err != nil { return deny(req.ID, "scope_unavailable", err.Error()) }
+		for _, entry := range entries {
+			if len(dirs) >= in.Limit { break }
+			if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 { continue }
+			path := filepath.Join(physical, entry.Name())
+			dirs = append(dirs, map[string]any{
+				"name": entry.Name(), "path": path,
+				"read_authorized": pathWithinAnyRoot(readRoots, path),
+				"work_authorized": pathWithinAnyRoot(writeRoots, path),
+			})
 		}
-		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-			continue
-		}
-		path := filepath.Join(physical, entry.Name())
-		dirs = append(dirs, map[string]any{
-			"name":            entry.Name(),
-			"path":            path,
-			"read_authorized": pathWithinAnyRoot(readRoots, path),
-			"work_authorized": pathWithinAnyRoot(writeRoots, path),
-		})
 	}
 	return ok(req.ID, map[string]any{
-		"physical_ceiling": physical,
+		"physical_ceiling": physicalRoots[0],
+		"physical_roots": physicalRoots,
 		"discovery_only":   true,
 		"directories":      dirs,
 		"note":             "Directory names are visible for discovery; contents remain subject to explicit root authorization.",

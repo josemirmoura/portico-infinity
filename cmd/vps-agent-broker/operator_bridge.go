@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/broker"
+	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/policy"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/state"
 	"github.com/josemirmoura/mcp-vps-agent-gateway/internal/wire"
 )
@@ -35,9 +36,15 @@ func eligibleWebApproval(a state.Approval, expectedSubject string) bool {
 		return false
 	}
 	if a.Kind == "root" {
-		ceiling := os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT")
-		if ceiling != "" && filepath.Clean(a.Resource) == filepath.Clean(ceiling) {
-			return false // ceiling-wide grants require interactive operator CLI
+		_, pluralConfigured := os.LookupEnv("VPS_AGENT_PHYSICAL_SCOPE_ROOTS")
+		if pluralConfigured || os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT") != "" {
+			ceilings, err := policy.PhysicalRoots()
+			if err != nil { return false }
+			for _, ceiling := range ceilings {
+				if filepath.Clean(a.Resource) == filepath.Clean(ceiling) {
+					return false // ceiling-wide grants require interactive operator CLI
+				}
+			}
 		}
 		return filepath.IsAbs(a.Resource) &&
 			(a.Access == "read" || a.Access == "work" || a.Access == "compose") &&
