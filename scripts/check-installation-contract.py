@@ -355,8 +355,8 @@ ux_requirements = {
         '"permissions.approval_status"', '"permissions.cancel_approval"',
     ],
     "internal/broker/broker.go": [
-        '"ceiling_wide": root == physical',
-        '"physical_ceiling": physical',
+        '"ceiling_wide":           ceilingWide',
+        '"physical_roots":         ceilings',
         '"permissions.discover_scope"',
         '"permissions.request_sensitive_access"',
     ],
