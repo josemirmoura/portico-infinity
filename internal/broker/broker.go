@@ -920,12 +920,15 @@ func (b *Broker) handle(ctx context.Context, req wire.Request) wire.Response {
 		if b.State == nil {
 			return deny(req.ID, "state_required", "root delegation listing requires durable state")
 		}
-		delegations, err := b.State.ListActiveRootDelegations(ctx, req.Subject)
+		delegations, err := b.activeRootDelegations(ctx, req.Subject)
 		if err != nil {
 			return deny(req.ID, "state_error", err.Error())
 		}
+		physicalRoots, err := policy.PhysicalRoots()
+		if err != nil { return deny(req.ID, "scope_unavailable", err.Error()) }
 		return ok(req.ID, map[string]any{
 			"physical_scope_root": os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT"),
+			"physical_scope_roots": physicalRoots,
 			"static": map[string]any{
 				"filesystem_read":  b.Policy.Filesystem.Read,
 				"filesystem_write": b.Policy.Filesystem.Write,
@@ -1276,7 +1279,17 @@ func (b *Broker) activeRootDelegations(ctx context.Context, subject string) ([]s
 	if b.State == nil || subject == "" {
 		return nil, nil
 	}
-	return b.State.ListActiveRootDelegations(ctx, subject)
+	roots, err := policy.PhysicalRoots()
+	if err != nil { return nil, err }
+	delegations, err := b.State.ListActiveRootDelegations(ctx, subject)
+	if err != nil { return nil, err }
+	allowed := make([]state.RootDelegation, 0, len(delegations))
+	for _, d := range delegations {
+		if pathWithinAnyRoot(roots, d.Root) {
+			allowed = append(allowed, d)
+		}
+	}
+	return allowed, nil
 }
 
 func (b *Broker) effectiveFileRoots(ctx context.Context, subject string) ([]string, []string, error) {
@@ -1364,13 +1377,10 @@ func (b *Broker) normalizeDelegatedRoot(root, access string) (string, string, er
 	default:
 		return "", "", errors.New("access must be read, work, or compose")
 	}
-	physical := os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT")
-	if physical == "" || !filepath.IsAbs(physical) {
-		return "", "", errors.New("physical scope root is not configured")
-	}
-	physical = filepath.Clean(physical)
-	if !pathWithinRoot(physical, root) {
-		return "", "", fmt.Errorf("root %q is outside physical scope %q", root, physical)
+	roots, err := policy.PhysicalRoots()
+	if err != nil { return "", "", err }
+	if !pathWithinAnyRoot(roots, root) {
+		return "", "", fmt.Errorf("root %q is outside physical scope", root)
 	}
 	if _, err := securefs.NewWithHostRoot(
 		[]string{root},
@@ -1454,7 +1464,12 @@ func (b *Broker) requestRootAccess(ctx context.Context, req wire.Request) wire.R
 		_ = b.State.AbortOperation(context.Background(), req.InvocationID)
 		return deny(req.ID, "approval_unavailable", err.Error())
 	}
-	physical := filepath.Clean(os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT"))
+	ceilings, err := policy.PhysicalRoots()
+	if err != nil { return deny(req.ID, "scope_unavailable", err.Error()) }
+	ceilingWide := false
+	for _, ceiling := range ceilings {
+		if ceiling == root { ceilingWide = true }
+	}
 	result, _ := json.Marshal(map[string]any{
 		"request_id":             a.ID,
 		"status":                 a.Status,
@@ -1465,8 +1480,9 @@ func (b *Broker) requestRootAccess(ctx context.Context, req wire.Request) wire.R
 		"approval_expires_at":    a.ExpiresAt,
 		"approval_required":      true,
 		"kind":                   "root",
-		"ceiling_wide":           root == physical,
-		"physical_ceiling":       physical,
+		"ceiling_wide":           ceilingWide,
+		"physical_ceiling":       ceilings[0],
+		"physical_roots":         ceilings,
 		"approval_token":         approvalToken,
 	})
 	if err := b.State.CompleteOperation(ctx, req.InvocationID, result); err != nil {

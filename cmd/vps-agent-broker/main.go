@@ -29,10 +29,15 @@ func main() {
 	if err != nil {
 		slog.Error("fatal", "error", err); os.Exit(1)
 	}
-	if physicalRoot := os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT"); physicalRoot != "" {
+	_, multipleScopesConfigured := os.LookupEnv("VPS_AGENT_PHYSICAL_SCOPE_ROOTS")
+	if os.Getenv("VPS_AGENT_PHYSICAL_SCOPE_ROOT") != "" || multipleScopesConfigured {
+		roots, rootsErr := policy.PhysicalRoots()
+		if rootsErr != nil {
+			slog.Error("physical_scope_invalid", "error", rootsErr); os.Exit(1)
+		}
 		wholeHost := os.Getenv("VPS_AGENT_WHOLE_HOST") == "1"
-		if err := cfg.ValidatePhysicalScope(physicalRoot, wholeHost); err != nil {
-			slog.Error("physical_scope_invalid", "root", physicalRoot, "whole_host", wholeHost, "error", err)
+		if err := cfg.ValidatePhysicalRoots(roots, wholeHost); err != nil {
+			slog.Error("physical_scope_invalid", "roots", roots, "whole_host", wholeHost, "error", err)
 			os.Exit(1)
 		}
 	}

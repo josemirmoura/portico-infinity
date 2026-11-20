@@ -14,12 +14,22 @@ const DefaultScanLimit = 50000
 var ErrScanLimit = errors.New("sensitive-path scan exceeded safety limit")
 
 func ProtectedName(path string) bool {
-	name := filepath.Base(filepath.Clean(path))
-	switch name {
-	case ".env.example", ".env.sample", ".env.template":
-		return false
+	clean := filepath.Clean(path)
+	for _, name := range strings.Split(clean, string(filepath.Separator)) {
+		switch name {
+		case ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config",
+			".netrc", ".npmrc", ".git-credentials", ".bashrc", ".bash_profile",
+			".profile", ".zshrc", "id_rsa", "id_ed25519", "authorized_keys", "known_hosts":
+			return true
+		case ".env.example", ".env.sample", ".env.template":
+			continue
+		}
+		if name == ".env" || strings.HasPrefix(name, ".env.") ||
+			strings.HasSuffix(name, ".pem") || strings.HasSuffix(name, ".key") {
+			return true
+		}
 	}
-	return name == ".env" || strings.HasPrefix(name, ".env.")
+	return false
 }
 
 func hostPath(hostRoot, canonical string) string {
